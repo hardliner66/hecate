@@ -59,30 +59,28 @@ const DEMO: &[u32] = {
     ]
 };
 
+fn run(memory: &[u32], verbose: bool) -> anyhow::Result<()> {
+    let mut cpu = NativeCpu::new(1024 * 1024, 6);
+    cpu.set_verbose(verbose);
+
+    cpu.load_memory(0, memory);
+
+    let stats = cpu.execute(RunMode::Run)?;
+
+    println!();
+    println!(" ========== STATS ===========");
+    println!();
+
+    println!("{:#?}", stats);
+    Ok(())
+}
+
 fn main() -> anyhow::Result<()> {
     let Args { action, verbose } = Args::parse();
 
     match action {
         Action::RunDemo => {
-            let mut cpu = NativeCpu::new(1024 * 1024, 6);
-            cpu.set_verbose(verbose);
-
-            cpu.load_memory(0, DEMO);
-
-            let stats = cpu.execute(RunMode::Run)?;
-
-            println!();
-            println!(" ========== STATS ===========");
-            println!();
-
-            if verbose {
-                println!(
-                    "Total cycles: {}, Memory Access score: {}",
-                    stats.cycles, stats.memory_access_score
-                );
-            }
-
-            println!("Total Score: {}", stats.cycles + stats.memory_access_score);
+            run(DEMO, verbose)?;
         }
         Action::WriteDemo { path } => {
             let file = std::fs::File::create(path)?;
@@ -104,25 +102,7 @@ fn main() -> anyhow::Result<()> {
                 })
                 .unwrap();
 
-            let mut cpu = NativeCpu::new(1024 * 1024, 6);
-            cpu.set_verbose(verbose);
-
-            cpu.load_memory(0, &memory);
-
-            let stats = cpu.execute(RunMode::Run)?;
-
-            println!();
-            println!(" ========== STATS ===========");
-            println!();
-
-            if verbose {
-                println!(
-                    "Total cycles: {}, Memory Access score: {}",
-                    stats.cycles, stats.memory_access_score
-                );
-            }
-
-            println!("Total Score: {}", stats.cycles + stats.memory_access_score);
+            run(&memory, verbose)?;
         }
     }
 

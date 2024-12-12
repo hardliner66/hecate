@@ -3,7 +3,9 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum ExecutionError {
-    #[error("Trying to access invalid memory location!")]
+    #[error("This is not implemented yet")]
+    NotImplemented,
+    #[error("Trying to access invalid memory location")]
     InvalidMemoryLocation,
     #[error("Stack Overflow")]
     StackOverflow,
@@ -14,7 +16,6 @@ pub enum ExecutionError {
 #[derive(Debug)]
 pub struct CpuStats {
     pub cycles: usize,
-    pub memory_access_score: usize,
 }
 
 pub trait CpuTrait {

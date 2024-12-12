@@ -1,6 +1,12 @@
-use common::{CpuStats, CpuTrait, DebugMode, ExecutionError, RunMode};
+use common::{CpuStats, CpuTrait, ExecutionError, RunMode};
 use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::FromPrimitive;
+
+const CYCLES_WRITE_MEMORY: usize = 1;
+const CYCLES_ACCESS_L1: usize = 3;
+const CYCLES_ACCESS_L2: usize = 11;
+const CYCLES_ACCESS_L3: usize = 50;
+const CYCLES_ACCESS_MEMORY: usize = 125;
 
 #[derive(Debug, PartialEq, PartialOrd, Copy, Clone, Hash, Eq, Ord, FromPrimitive, ToPrimitive)]
 #[repr(u32)]
@@ -24,22 +30,21 @@ pub enum Bytecode {
 #[derive(Debug)]
 pub struct NativeCpu {
     memory: Vec<u32>,
-    memory_score_multiplier: usize,
     registers: Vec<u32>,
     instruction_pointer: u32,
     stack_pointer: u32, // Stack pointer
     verbose: bool,
-    cycles: usize,              // Performance counter for cycles
-    memory_access_score: usize, // Tracks the performance score
+    cycles: usize, // Performance counter for cycles
     l1_start: u32,
     l1_size: u32,
-    l1_score_multiplier: usize,
     l2_start: u32,
     l2_size: u32,
-    l2_score_multiplier: usize,
     l3_start: u32,
     l3_size: u32,
-    l3_score_multiplier: usize,
+    access_count_l1: usize,
+    access_count_l2: usize,
+    access_count_l3: usize,
+    access_count_memory: usize,
 }
 
 impl CpuTrait for NativeCpu {
@@ -56,25 +61,10 @@ impl CpuTrait for NativeCpu {
 
     fn execute(&mut self, run_mode: RunMode) -> Result<CpuStats, ExecutionError> {
         match run_mode {
-            RunMode::Run => {
-                self.run(-1)?;
-            }
-            RunMode::Debug(debug_mode) => match debug_mode {
-                DebugMode::All => println!("Debugging with all breakpoints"),
-                DebugMode::Code => println!("Debugging with code breakpoints"),
-                DebugMode::Data => println!("Debugging with data breakpoints"),
-            },
-            RunMode::StepOver => println!("Stepping over"),
-            RunMode::StepInto => println!("Stepping into"),
-            RunMode::StepOut => println!("Stepping out"),
-            RunMode::RunFor(cycles) => {
-                self.run(cycles)?;
-            }
+            RunMode::Run => self.run(-1),
+            RunMode::RunFor(cycles) => self.run(cycles),
+            _ => Err(ExecutionError::NotImplemented),
         }
-        Ok(CpuStats {
-            cycles: self.cycles,
-            memory_access_score: self.memory_access_score,
-        })
     }
 
     fn get_registers(&self) -> &[Self::Size] {
@@ -90,22 +80,21 @@ impl NativeCpu {
     pub fn new(memory_size: u32, registers: u8) -> Self {
         Self {
             memory: vec![0; memory_size as usize],
-            memory_score_multiplier: 10,
             registers: vec![0; registers as usize],
             instruction_pointer: 0,
             stack_pointer: memory_size - 1, // Stack starts at the top of memory
             verbose: false,
             cycles: 0,
-            memory_access_score: 0,
             l1_start: 0,
             l1_size: 64 * 1024, // 64 KB L1 cache
-            l1_score_multiplier: 1,
             l2_start: 64 * 1024,
             l2_size: 256 * 1024, // 256 KB L2 cache
-            l2_score_multiplier: 2,
             l3_start: 320 * 1024,
-            l3_size: 1 * 1024 * 1024, // 1 MB L3 cache
-            l3_score_multiplier: 5,
+            l3_size: 1024 * 1024, // 1 MB L3 cache
+            access_count_l1: 0,
+            access_count_l2: 0,
+            access_count_l3: 0,
+            access_count_memory: 0,
         }
     }
 
@@ -250,7 +239,7 @@ impl NativeCpu {
                     // Jump to the target address
                     self.instruction_pointer = target;
 
-                    self.cycles += 3; // CALL takes 3 cycles
+                    self.cycles += 25;
                 }
                 Some(Bytecode::RetReg) => {
                     let reg = self.read_memory(self.instruction_pointer)?;
@@ -266,7 +255,7 @@ impl NativeCpu {
                     self.push_stack(self.registers[reg as usize])?;
 
                     self.instruction_pointer = return_address;
-                    self.cycles += 2; // RET takes 2 cycles
+                    self.cycles += 2;
                 }
                 Some(Bytecode::Ret) => {
                     // Pop the return address from the stack
@@ -277,7 +266,7 @@ impl NativeCpu {
                     }
 
                     self.instruction_pointer = return_address;
-                    self.cycles += 2; // RET takes 2 cycles
+                    self.cycles += 23;
                 }
                 Some(Bytecode::Halt) => {
                     if self.verbose {
@@ -299,19 +288,22 @@ impl NativeCpu {
         }
         Ok(CpuStats {
             cycles: self.cycles,
-            memory_access_score: self.memory_access_score,
         })
     }
 
-    fn get_access_score(&self, address: u32) -> usize {
+    fn update_memory_cycles(&mut self, address: u32) {
         if address >= self.l1_start && address < self.l1_start + self.l1_size {
-            self.l1_score_multiplier
+            self.access_count_l1 += 1;
+            self.cycles += CYCLES_ACCESS_L1;
         } else if address >= self.l2_start && address < self.l2_start + self.l2_size {
-            self.l2_score_multiplier
+            self.access_count_l2 += 1;
+            self.cycles += CYCLES_ACCESS_L2;
         } else if address >= self.l3_start && address < self.l3_start + self.l3_size {
-            self.l3_score_multiplier
+            self.access_count_l3 += 1;
+            self.cycles += CYCLES_ACCESS_L3;
         } else {
-            self.memory_score_multiplier
+            self.access_count_memory += 1;
+            self.cycles += CYCLES_ACCESS_MEMORY;
         }
     }
 
@@ -325,12 +317,13 @@ impl NativeCpu {
 
     fn read_memory(&mut self, address: u32) -> Result<u32, ExecutionError> {
         self.valid_address(address)?;
-        self.memory_access_score += self.get_access_score(address);
+        self.update_memory_cycles(address);
         Ok(self.memory[address as usize])
     }
 
     fn write_memory(&mut self, address: u32, value: u32) -> Result<(), ExecutionError> {
         self.valid_address(address)?;
+        self.cycles += CYCLES_WRITE_MEMORY;
         self.memory[address as usize] = value;
         Ok(())
     }
@@ -340,7 +333,7 @@ impl NativeCpu {
             return Err(ExecutionError::StackOverflow);
         }
 
-        self.memory[self.stack_pointer as usize] = value;
+        self.write_memory(self.stack_pointer, value)?;
         self.stack_pointer -= 1;
         Ok(())
     }
@@ -351,6 +344,6 @@ impl NativeCpu {
         }
 
         self.stack_pointer += 1;
-        Ok(self.memory[self.stack_pointer as usize])
+        self.read_memory(self.stack_pointer)
     }
 }
