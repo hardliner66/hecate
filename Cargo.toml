@@ -1,0 +1,15 @@
+[package]
+name = "hecate"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.94"
+byteorder = "1.5.0"
+clap = { version = "4.5.22", features = ["derive"] }
+common = { version = "0.1.0", path = "common" }
+num-derive = "0.4.2"
+num-traits = "0.2.19"
+
+[workspace]
+members = ["common"]
