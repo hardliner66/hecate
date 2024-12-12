@@ -4,6 +4,17 @@ This project provides an implementation of a CPU for the Hecate virtual machine.
 
 ---
 
+## Where does the name come from?
+
+The project is named Hecate, inspired by the ancient Greek goddess associated with magic, crossroads, and guiding transformations.
+Just as Hecate stood at the intersection of possibilities, this CPU project represents the convergence of computational logic,
+optimization, and problem-solving, providing participants with a structured yet flexible virtual machine to explore and
+optimize their solutions.
+
+The name reflects both the mystical allure of programming challenges and the power of guiding complex tasks to completion.
+
+---
+
 ## Features
 
 - Bytecode Execution:
