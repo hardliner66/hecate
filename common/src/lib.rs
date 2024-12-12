@@ -13,9 +13,18 @@ pub enum ExecutionError {
     StackUnderflow,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CacheHits {
+    pub l1: usize,
+    pub l2: usize,
+    pub l3: usize,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
 pub struct CpuStats {
     pub cycles: usize,
+    pub memory_access_count: usize,
+    pub cache_hits: CacheHits,
 }
 
 pub trait CpuTrait {

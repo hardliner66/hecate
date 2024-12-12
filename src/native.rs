@@ -34,17 +34,14 @@ pub struct NativeCpu {
     instruction_pointer: u32,
     stack_pointer: u32, // Stack pointer
     verbose: bool,
-    cycles: usize, // Performance counter for cycles
     l1_start: u32,
     l1_size: u32,
     l2_start: u32,
     l2_size: u32,
     l3_start: u32,
     l3_size: u32,
-    access_count_l1: usize,
-    access_count_l2: usize,
-    access_count_l3: usize,
-    access_count_memory: usize,
+    last_accessed_address: Option<u32>,
+    stats: CpuStats,
 }
 
 impl CpuTrait for NativeCpu {
@@ -83,18 +80,15 @@ impl NativeCpu {
             registers: vec![0; registers as usize],
             instruction_pointer: 0,
             stack_pointer: memory_size - 1, // Stack starts at the top of memory
+            last_accessed_address: None,
             verbose: false,
-            cycles: 0,
             l1_start: 0,
-            l1_size: 64 * 1024, // 64 KB L1 cache
-            l2_start: 64 * 1024,
-            l2_size: 256 * 1024, // 256 KB L2 cache
-            l3_start: 320 * 1024,
-            l3_size: 1024 * 1024, // 1 MB L3 cache
-            access_count_l1: 0,
-            access_count_l2: 0,
-            access_count_l3: 0,
-            access_count_memory: 0,
+            l1_size: (64 * 1024) / 32, // 64 KB L1 cache
+            l2_start: 0,
+            l2_size: (256 * 1024) / 32, // 256 KB L2 cache
+            l3_start: 0,
+            l3_size: (1024 * 1024) / 32, // 1 MB L3 cache
+            stats: CpuStats::default(),
         }
     }
 
@@ -120,7 +114,7 @@ impl NativeCpu {
                     }
 
                     self.registers[reg as usize] = imm;
-                    self.cycles += 2;
+                    self.stats.cycles += 2;
                 }
                 Some(Bytecode::LoadMemory) => {
                     let reg = self.read_memory(self.instruction_pointer)?;
@@ -134,7 +128,7 @@ impl NativeCpu {
                     }
 
                     self.registers[reg as usize] = self.read_memory(addr)?;
-                    self.cycles += 2;
+                    self.stats.cycles += 2;
                 }
                 Some(Bytecode::Store) => {
                     let addr = self.read_memory(self.instruction_pointer)?;
@@ -148,7 +142,7 @@ impl NativeCpu {
                     }
 
                     self.write_memory(addr, self.registers[reg as usize])?;
-                    self.cycles += 2;
+                    self.stats.cycles += 2;
                 }
                 Some(Bytecode::Inspect) => {
                     let addr = self.read_memory(self.instruction_pointer)?;
@@ -175,7 +169,7 @@ impl NativeCpu {
 
                     self.registers[reg1 as usize] =
                         self.registers[reg1 as usize].wrapping_add(self.registers[reg2 as usize]);
-                    self.cycles += 1;
+                    self.stats.cycles += 1;
                 }
                 Some(Bytecode::Jmp) => {
                     let imm = self.read_memory(self.instruction_pointer)?;
@@ -185,7 +179,7 @@ impl NativeCpu {
                         println!("JMP {}", imm);
                     }
 
-                    self.cycles += 2;
+                    self.stats.cycles += 2;
                 }
                 Some(Bytecode::PushValue) => {
                     let imm = self.read_memory(self.instruction_pointer)?;
@@ -197,7 +191,7 @@ impl NativeCpu {
 
                     self.push_stack(imm)?;
 
-                    self.cycles += 2;
+                    self.stats.cycles += 2;
                 }
                 Some(Bytecode::PushReg) => {
                     let reg = self.read_memory(self.instruction_pointer)?;
@@ -211,7 +205,7 @@ impl NativeCpu {
 
                     self.push_stack(val)?;
 
-                    self.cycles += 2;
+                    self.stats.cycles += 2;
                 }
                 Some(Bytecode::Pop) => {
                     let reg = self.read_memory(self.instruction_pointer)?;
@@ -223,7 +217,7 @@ impl NativeCpu {
 
                     self.registers[reg as usize] = self.pop_stack()?;
 
-                    self.cycles += 2;
+                    self.stats.cycles += 2;
                 }
                 Some(Bytecode::Call) => {
                     let target = self.read_memory(self.instruction_pointer)?;
@@ -239,7 +233,7 @@ impl NativeCpu {
                     // Jump to the target address
                     self.instruction_pointer = target;
 
-                    self.cycles += 25;
+                    self.stats.cycles += 25;
                 }
                 Some(Bytecode::RetReg) => {
                     let reg = self.read_memory(self.instruction_pointer)?;
@@ -255,7 +249,7 @@ impl NativeCpu {
                     self.push_stack(self.registers[reg as usize])?;
 
                     self.instruction_pointer = return_address;
-                    self.cycles += 2;
+                    self.stats.cycles += 2;
                 }
                 Some(Bytecode::Ret) => {
                     // Pop the return address from the stack
@@ -266,7 +260,7 @@ impl NativeCpu {
                     }
 
                     self.instruction_pointer = return_address;
-                    self.cycles += 23;
+                    self.stats.cycles += 23;
                 }
                 Some(Bytecode::Halt) => {
                     if self.verbose {
@@ -278,6 +272,7 @@ impl NativeCpu {
                     if self.verbose {
                         println!("NOP");
                     }
+                    self.stats.cycles += 1;
                 }
                 None => {
                     println!("Unknown opcode: {:X}", opcode);
@@ -286,24 +281,77 @@ impl NativeCpu {
             }
             executed += 1;
         }
-        Ok(CpuStats {
-            cycles: self.cycles,
-        })
+        Ok(self.stats)
     }
 
-    fn update_memory_cycles(&mut self, address: u32) {
+    fn update_cache(last_accessed_address: Option<u32>, address: u32, start: &mut u32, size: u32) {
+        *start = address.saturating_sub(size / 2);
+        if let Some(last) = last_accessed_address {
+            match last.cmp(&address) {
+                std::cmp::Ordering::Less => {
+                    *start = last;
+                }
+                std::cmp::Ordering::Greater => {
+                    *start = last.saturating_sub(size);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn track_memory_access(&mut self, address: u32) {
+        self.stats.memory_access_count += 1;
         if address >= self.l1_start && address < self.l1_start + self.l1_size {
-            self.access_count_l1 += 1;
-            self.cycles += CYCLES_ACCESS_L1;
+            self.stats.cycles += CYCLES_ACCESS_L1;
+            self.last_accessed_address = Some(address);
+            self.stats.cache_hits.l1 += 1;
         } else if address >= self.l2_start && address < self.l2_start + self.l2_size {
-            self.access_count_l2 += 1;
-            self.cycles += CYCLES_ACCESS_L2;
+            Self::update_cache(
+                self.last_accessed_address,
+                address,
+                &mut self.l1_start,
+                self.l1_size,
+            );
+            self.stats.cache_hits.l2 += 1;
+            self.stats.cycles += CYCLES_ACCESS_L2;
+            self.last_accessed_address = Some(address);
         } else if address >= self.l3_start && address < self.l3_start + self.l3_size {
-            self.access_count_l3 += 1;
-            self.cycles += CYCLES_ACCESS_L3;
+            Self::update_cache(
+                self.last_accessed_address,
+                address,
+                &mut self.l1_start,
+                self.l1_size,
+            );
+            Self::update_cache(
+                self.last_accessed_address,
+                address,
+                &mut self.l2_start,
+                self.l2_size,
+            );
+            self.stats.cache_hits.l3 += 1;
+            self.stats.cycles += CYCLES_ACCESS_L3;
+            self.last_accessed_address = Some(address);
         } else {
-            self.access_count_memory += 1;
-            self.cycles += CYCLES_ACCESS_MEMORY;
+            Self::update_cache(
+                self.last_accessed_address,
+                address,
+                &mut self.l1_start,
+                self.l1_size,
+            );
+            Self::update_cache(
+                self.last_accessed_address,
+                address,
+                &mut self.l2_start,
+                self.l2_size,
+            );
+            Self::update_cache(
+                self.last_accessed_address,
+                address,
+                &mut self.l3_start,
+                self.l3_size,
+            );
+            self.last_accessed_address = Some(address);
+            self.stats.cycles += CYCLES_ACCESS_MEMORY;
         }
     }
 
@@ -317,13 +365,13 @@ impl NativeCpu {
 
     fn read_memory(&mut self, address: u32) -> Result<u32, ExecutionError> {
         self.valid_address(address)?;
-        self.update_memory_cycles(address);
+        self.track_memory_access(address);
         Ok(self.memory[address as usize])
     }
 
     fn write_memory(&mut self, address: u32, value: u32) -> Result<(), ExecutionError> {
         self.valid_address(address)?;
-        self.cycles += CYCLES_WRITE_MEMORY;
+        self.stats.cycles += CYCLES_WRITE_MEMORY;
         self.memory[address as usize] = value;
         Ok(())
     }
