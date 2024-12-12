@@ -1,6 +1,6 @@
-# Native CPU Implementation for Hecate Virtual Machine
+# Hecate Virtual Machine
 
-This project provides an implementation of a CPU for the Hecate virtual machine.
+This project provides an implementation of the Hecate virtual machine.
 
 ---
 
