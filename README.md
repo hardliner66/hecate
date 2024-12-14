@@ -25,7 +25,7 @@ The name reflects both the mystical allure of programming challenges and the pow
 - Bytecode Execution:
   - Supports a well-defined set of instructions for computation, memory operations, and control flow.
   - Instructions include:
-    - Arithmetic operations (Add)
+    - Arithmetic operations (Add, Sub, Mul, Div)
     - Memory access (LoadValue, LoadMemory, Store)
     - Stack manipulation (PushValue, PushReg, Pop)
     - Control flow (Call, Ret, Jmp)
