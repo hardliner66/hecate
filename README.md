@@ -15,6 +15,11 @@ The name reflects both the mystical allure of programming challenges and the pow
 
 ---
 
+## ATTENTION
+**This project is currently unstable. Changes are to be expected. Use at your own risk!**
+
+---
+
 ## Features
 
 - Bytecode Execution:
@@ -74,6 +79,9 @@ This might be changed later, but for now this should be enough.
 | `0x05`       | `PushReg`    | Push register value onto the stack         |
 | `0x06`       | `Pop`        | Pop a value from the stack into a register |
 | `0x10`       | `Add`        | Add two register values                    |
+| `0x11`       | `Sub`        | Subtract two register values               |
+| `0x12`       | `Mul`        | Multiply two register values               |
+| `0x13`       | `Div`        | Divide two register values                 |
 | `0xF0`       | `Call`       | Call a function                            |
 | `0xF1`       | `Ret`        | Return from a function                     |
 | `0xF2`       | `RetReg`     | Return and push a register value           |

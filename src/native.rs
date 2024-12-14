@@ -19,6 +19,9 @@ pub enum Bytecode {
     PushReg = 0x05,
     Pop = 0x06,
     Add = 0x10,
+    Sub = 0x11,
+    Mul = 0x12,
+    Div = 0x13,
     Call = 0xF0,
     Ret = 0xF1,
     RetReg = 0xF2,
@@ -170,6 +173,69 @@ impl NativeCpu {
                     self.registers[reg1 as usize] =
                         self.registers[reg1 as usize].wrapping_add(self.registers[reg2 as usize]);
                     self.stats.cycles += 1;
+                }
+                Some(Bytecode::Sub) => {
+                    let reg1 = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let reg2 = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    if self.verbose {
+                        println!(
+                            "SUB R{}({}), R{}({})",
+                            reg1,
+                            self.registers[reg1 as usize],
+                            reg2,
+                            self.registers[reg2 as usize]
+                        );
+                    }
+
+                    self.registers[reg1 as usize] =
+                        self.registers[reg1 as usize].wrapping_sub(self.registers[reg2 as usize]);
+                    self.stats.cycles += 1;
+                }
+                Some(Bytecode::Mul) => {
+                    let reg1 = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let reg2 = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    if self.verbose {
+                        println!(
+                            "MUL R{}({}), R{}({})",
+                            reg1,
+                            self.registers[reg1 as usize],
+                            reg2,
+                            self.registers[reg2 as usize]
+                        );
+                    }
+
+                    self.registers[reg1 as usize] =
+                        self.registers[reg1 as usize].wrapping_mul(self.registers[reg2 as usize]);
+                    self.stats.cycles *= 4;
+                }
+                Some(Bytecode::Div) => {
+                    let reg1 = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let reg2 = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    if self.verbose {
+                        println!(
+                            "DIV R{}({}), R{}({})",
+                            reg1,
+                            self.registers[reg1 as usize],
+                            reg2,
+                            self.registers[reg2 as usize]
+                        );
+                    }
+
+                    self.registers[reg1 as usize] =
+                        self.registers[reg1 as usize].wrapping_div(self.registers[reg2 as usize]);
+                    self.stats.cycles *= 27;
                 }
                 Some(Bytecode::Jmp) => {
                     let imm = self.read_memory(self.instruction_pointer)?;
