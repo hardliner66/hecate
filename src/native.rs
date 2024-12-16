@@ -1,5 +1,4 @@
-use common::{CpuStats, CpuTrait, ExecutionError, RunMode};
-use num_derive::{FromPrimitive, ToPrimitive};
+use common::{Bytecode, CpuStats, CpuTrait, ExecutionError, RunMode};
 use num_traits::FromPrimitive;
 
 const CYCLES_WRITE_MEMORY: usize = 1;
@@ -8,26 +7,12 @@ const CYCLES_ACCESS_L2: usize = 11;
 const CYCLES_ACCESS_L3: usize = 50;
 const CYCLES_ACCESS_MEMORY: usize = 125;
 
-#[derive(Debug, PartialEq, PartialOrd, Copy, Clone, Hash, Eq, Ord, FromPrimitive, ToPrimitive)]
-#[repr(u32)]
-pub enum Bytecode {
-    Nop = 0x00,
-    LoadValue = 0x01,
-    LoadMemory = 0x02,
-    Store = 0x03,
-    PushValue = 0x04,
-    PushReg = 0x05,
-    Pop = 0x06,
-    Add = 0x10,
-    Sub = 0x11,
-    Mul = 0x12,
-    Div = 0x13,
-    Call = 0xF0,
-    Ret = 0xF1,
-    RetReg = 0xF2,
-    Jmp = 0xF3,
-    Inspect = 0xFE,
-    Halt = 0xFFFFFFFF,
+#[derive(Debug, Default, Clone, Copy)]
+pub struct Flags {
+    pub zero: bool,
+    pub carry: bool,
+    pub sign: bool,
+    pub overflow: bool,
 }
 
 #[derive(Debug)]
@@ -45,6 +30,7 @@ pub struct NativeCpu {
     l3_size: u32,
     last_accessed_address: Option<u32>,
     stats: CpuStats,
+    flags: Flags,
 }
 
 impl CpuTrait for NativeCpu {
@@ -92,7 +78,124 @@ impl NativeCpu {
             l3_start: 0,
             l3_size: (1024 * 1024) / 32, // 1 MB L3 cache
             stats: CpuStats::default(),
+            flags: Flags::default(),
         }
+    }
+
+    fn update_flags_mul(&mut self, _a: u32, _b: u32, result: u64) {
+        // The final value is the lower 32 bits
+        let low_result = result as u32;
+
+        // Zero flag
+        self.flags.zero = low_result == 0;
+
+        // Sign flag (check MSB of low_result)
+        self.flags.sign = (low_result as i32) < 0;
+
+        // Carry and Overflow:
+        // If the upper 32 bits of result are not zero, it means the multiplication overflowed the 32-bit range.
+        let high_result = (result >> 32) as u32;
+        let overflow_occurred = high_result != 0;
+        self.flags.carry = overflow_occurred;
+        self.flags.overflow = overflow_occurred;
+    }
+
+    fn update_flags_div(&mut self, _a: u32, _b: u32, result: u32) {
+        // For DIV:
+        // Typically, if DIV does not cause division by zero or overflow, CF and OF are cleared.
+        self.flags.carry = false;
+        self.flags.overflow = false;
+
+        // Zero flag: set if result is zero
+        self.flags.zero = result == 0;
+
+        // Sign flag
+        self.flags.sign = (result as i32) < 0;
+    }
+
+    fn should_jump(&self, instr: Bytecode) -> bool {
+        let f = &self.flags;
+        // If you need to check CX register for Jxcz:
+        // Let's assume CX is register 1 (just an example, adapt as needed)
+        // let cx = self.registers[1]; // or whichever register is CX in your setup
+
+        match instr {
+            // Signed conditions
+            Bytecode::Je => f.zero,
+            Bytecode::Jne => !f.zero,
+            Bytecode::Jg => !f.zero && (f.sign == f.overflow),
+            Bytecode::Jge => f.sign == f.overflow,
+            Bytecode::Jl => f.sign != f.overflow,
+            Bytecode::Jle => f.zero || (f.sign != f.overflow),
+
+            // Unsigned conditions
+            Bytecode::Ja => !f.carry && !f.zero,
+            Bytecode::Jae => !f.carry,
+            Bytecode::Jb => f.carry,
+            Bytecode::Jbe => f.carry || f.zero,
+
+            // Other flag conditions
+            Bytecode::Jc => f.carry,
+            Bytecode::Jnc => !f.carry,
+            Bytecode::Jo => f.overflow,
+            Bytecode::Jno => !f.overflow,
+            Bytecode::Js => f.sign,
+            Bytecode::Jns => !f.sign,
+
+            // Parity-related (if implemented):
+            // Bytecode::Jp => f.parity,
+            // Bytecode::Jnp => !f.parity,
+
+            // Special conditions
+            Bytecode::Jxcz => {
+                let cx = self.registers.get(1).copied().unwrap_or(0);
+                cx == 0
+            }
+
+            // For all other instructions that are not conditional jumps:
+            _ => false,
+        }
+    }
+    fn update_flags_add(&mut self, a: u32, b: u32, result: u32) {
+        // Zero flag
+        self.flags.zero = result == 0;
+
+        // Sign flag (check MSB of result)
+        self.flags.sign = (result as i32) < 0;
+
+        // Carry flag: if unsigned addition overflows
+        let (_, c) = a.overflowing_add(b);
+        self.flags.carry = c; // 'c' indicates if carry occurred
+                              // Alternatively, check using a u64 cast:
+                              // self.flags.carry = (a as u64 + b as u64) > 0xFFFF_FFFF;
+
+        // Overflow flag: check signed overflow
+        // Signed overflow occurs if (a and b have same sign) and (result differs in sign)
+        let a_sign = (a as i32) < 0;
+        let b_sign = (b as i32) < 0;
+        let r_sign = (result as i32) < 0;
+        self.flags.overflow = (a_sign == b_sign) && (a_sign != r_sign);
+    }
+
+    // Call this after you perform a SUB instruction: result = a - b
+    fn update_flags_sub(&mut self, a: u32, b: u32, result: u32) {
+        // Zero flag
+        self.flags.zero = result == 0;
+
+        // Sign flag
+        self.flags.sign = (result as i32) < 0;
+
+        // Carry flag for subtraction: set if there's a borrow.
+        // A borrow occurs if b > a in an unsigned sense.
+        self.flags.carry = b > a;
+
+        // Overflow flag: For subtraction, overflow occurs if the sign of a and b differ
+        // and the sign of the result differs from a.
+        let a_sign = (a as i32) < 0;
+        let b_sign = (b as i32) < 0;
+        let r_sign = (result as i32) < 0;
+        // Overflow occurs if (a_sign != b_sign) and (r_sign != a_sign)
+        self.flags.overflow = (a_sign != b_sign) && (r_sign != a_sign);
     }
 
     fn run(&mut self, cycles: isize) -> Result<CpuStats, ExecutionError> {
@@ -160,18 +263,16 @@ impl NativeCpu {
                     let reg2 = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
+                    let a = self.registers[reg1 as usize];
+                    let b = self.registers[reg2 as usize];
+                    let result = a.wrapping_add(b);
+
                     if self.verbose {
-                        println!(
-                            "ADD R{}({}), R{}({})",
-                            reg1,
-                            self.registers[reg1 as usize],
-                            reg2,
-                            self.registers[reg2 as usize]
-                        );
+                        println!("ADD R{}({}), R{}({}) => {}", reg1, a, reg2, b, result);
                     }
 
-                    self.registers[reg1 as usize] =
-                        self.registers[reg1 as usize].wrapping_add(self.registers[reg2 as usize]);
+                    self.registers[reg1 as usize] = result;
+                    self.update_flags_add(a, b, result);
                     self.stats.cycles += 1;
                 }
                 Some(Bytecode::Sub) => {
@@ -181,18 +282,16 @@ impl NativeCpu {
                     let reg2 = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
+                    let a = self.registers[reg1 as usize];
+                    let b = self.registers[reg2 as usize];
+                    let result = a.wrapping_sub(b);
+
                     if self.verbose {
-                        println!(
-                            "SUB R{}({}), R{}({})",
-                            reg1,
-                            self.registers[reg1 as usize],
-                            reg2,
-                            self.registers[reg2 as usize]
-                        );
+                        println!("SUB R{}({}), R{}({}) => {}", reg1, a, reg2, b, result);
                     }
 
-                    self.registers[reg1 as usize] =
-                        self.registers[reg1 as usize].wrapping_sub(self.registers[reg2 as usize]);
+                    self.registers[reg1 as usize] = result;
+                    self.update_flags_sub(a, b, result);
                     self.stats.cycles += 1;
                 }
                 Some(Bytecode::Mul) => {
@@ -202,18 +301,20 @@ impl NativeCpu {
                     let reg2 = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
+                    let a = self.registers[reg1 as usize];
+                    let b = self.registers[reg2 as usize];
+
+                    let wide_result = (a as u64).wrapping_mul(b as u64);
+                    let result = wide_result as u32;
+
                     if self.verbose {
-                        println!(
-                            "MUL R{}({}), R{}({})",
-                            reg1,
-                            self.registers[reg1 as usize],
-                            reg2,
-                            self.registers[reg2 as usize]
-                        );
+                        println!("MUL R{}({}), R{}({}) => {}", reg1, a, reg2, b, result);
                     }
 
-                    self.registers[reg1 as usize] =
-                        self.registers[reg1 as usize].wrapping_mul(self.registers[reg2 as usize]);
+                    self.registers[reg1 as usize] = result;
+                    self.update_flags_mul(a, b, wide_result);
+
+                    // For cycle cost, just keep whatever logic you have; previously *4 was mentioned.
                     self.stats.cycles *= 4;
                 }
                 Some(Bytecode::Div) => {
@@ -223,18 +324,24 @@ impl NativeCpu {
                     let reg2 = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
-                    if self.verbose {
-                        println!(
-                            "DIV R{}({}), R{}({})",
-                            reg1,
-                            self.registers[reg1 as usize],
-                            reg2,
-                            self.registers[reg2 as usize]
-                        );
+                    let a = self.registers[reg1 as usize];
+                    let b = self.registers[reg2 as usize];
+
+                    if b == 0 {
+                        return Err(ExecutionError::DivisionByZero);
                     }
 
-                    self.registers[reg1 as usize] =
-                        self.registers[reg1 as usize].wrapping_div(self.registers[reg2 as usize]);
+                    // Perform unsigned division
+                    let result = a.wrapping_div(b);
+
+                    if self.verbose {
+                        println!("DIV R{}({}), R{}({}) => {}", reg1, a, reg2, b, result);
+                    }
+
+                    self.registers[reg1 as usize] = result;
+                    self.update_flags_div(a, b, result);
+
+                    // For cycle cost, previously *27 was mentioned.
                     self.stats.cycles *= 27;
                 }
                 Some(Bytecode::Jmp) => {
@@ -301,22 +408,6 @@ impl NativeCpu {
 
                     self.stats.cycles += 25;
                 }
-                Some(Bytecode::RetReg) => {
-                    let reg = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
-
-                    // Pop the return address from the stack
-                    let return_address = self.pop_stack()?;
-
-                    if self.verbose {
-                        println!("RET R{} to @{:#02x}", reg, return_address);
-                    }
-
-                    self.push_stack(self.registers[reg as usize])?;
-
-                    self.instruction_pointer = return_address;
-                    self.stats.cycles += 2;
-                }
                 Some(Bytecode::Ret) => {
                     // Pop the return address from the stack
                     let return_address = self.pop_stack()?;
@@ -334,7 +425,64 @@ impl NativeCpu {
                     }
                     break;
                 }
-                Some(Bytecode::Nop) => {
+                Some(Bytecode::Cmp) => {
+                    let reg1 = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let reg2 = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let a = self.registers[reg1 as usize];
+                    let b = self.registers[reg2 as usize];
+
+                    // Perform a subtraction in a temporary variable just to get flags.
+                    let result = a.wrapping_sub(b);
+
+                    if self.verbose {
+                        println!("CMP R{}({}), R{}({}) => (flags updated for {} - {})", reg1, a, reg2, b, a, b);
+                    }
+
+                    // Update flags as if we did SUB, but do not store result anywhere.
+                    self.update_flags_sub(a, b, result);
+
+                    self.stats.cycles += 1; // or however many cycles CMP should cost
+                }
+                Some(Bytecode::Je) |
+                Some(Bytecode::Jne) |
+                Some(Bytecode::Jg) |
+                Some(Bytecode::Jge) |
+                Some(Bytecode::Jl) |
+                Some(Bytecode::Jle) |
+                Some(Bytecode::Ja) |
+                Some(Bytecode::Jae) |
+                Some(Bytecode::Jb) |
+                Some(Bytecode::Jbe) |
+                Some(Bytecode::Jc) |
+                Some(Bytecode::Jnc) |
+                Some(Bytecode::Jo) |
+                Some(Bytecode::Jno) |
+                Some(Bytecode::Js) |
+                Some(Bytecode::Jns) |
+                Some(Bytecode::Jp) | // if parity is implemented
+                Some(Bytecode::Jnp) | // if parity is implemented
+                Some(Bytecode::Jxcz) => {
+                    // All these jump instructions have the same pattern: they read an immediate address
+                    let imm = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    // Check if we should jump
+                    if self.should_jump(Bytecode::from_u32(opcode).unwrap()) {
+                        if self.verbose {
+                            println!("CONDITIONAL JUMP to {}", imm);
+                        }
+                        self.instruction_pointer = imm;
+                    } else if self.verbose {
+                            println!("CONDITIONAL JUMP not taken");
+                    }
+
+                    self.stats.cycles += 2; // Some arbitrary cycle cost for conditional jumps
+                }
+                        Some(Bytecode::Nop) => {
                     if self.verbose {
                         println!("NOP");
                     }

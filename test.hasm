@@ -1,0 +1,23 @@
+; This program computes factorial of R0 in a loop
+; Assume R0 is the input
+; R1 = result
+
+start:
+load R1, 1     ; R1 = 1
+cmp R0, R0
+je @end         ; if R0 == 0, skip loop
+
+loop:
+mul R1, R0
+load R2, 1
+sub R0, R2
+load R2, 0
+cmp R0, R2
+jne @loop
+
+end:
+; Move R1 into R0 (push/pop trick)
+push R1
+pop R0
+
+halt
