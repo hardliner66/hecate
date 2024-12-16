@@ -66,45 +66,51 @@ pub enum Bytecode {
     Nop = 0x00,
     LoadValue = 0x01,
     LoadMemory = 0x02,
-    Store = 0x03,
-    PushValue = 0x04,
-    PushReg = 0x05,
-    Pop = 0x06,
-    Add = 0x10,
-    Sub = 0x11,
-    Mul = 0x12,
-    Div = 0x13,
+    LoadReg = 0x03,
+    Store = 0x04,
+    PushValue = 0x05,
+    PushReg = 0x06,
+    Pop = 0x07,
+    Add = 0x11,
+    AddValue = 0x12,
+    Sub = 0x13,
+    SubValue = 0x14,
+    Mul = 0x15,
+    MulValue = 0x16,
+    Div = 0x17,
+    DivValue = 0x18,
     Call = 0xF0,
     Ret = 0xF1,
 
     Cmp = 0xC00,
-    Jmp = 0xC01,
+    CmpValue = 0xC01,
+    Jmp = 0xC02,
     // Signed conditions
-    Je = 0xC02,  // Jump Equal/Zero (ZF=1)
+    Je = 0xC03,  // Jump Equal/Zero (ZF=1)
     Jne = 0xC04, // Jump Not Equal/Not Zero (ZF=0)
-    Jg = 0xC06,  // Jump Greater (ZF=0 and SF=OF)
-    Jge = 0xC08, // Jump Greater or Equal (SF=OF)
-    Jl = 0xC0A,  // Jump Less (SF!=OF)
-    Jle = 0xC0C, // Jump Less or Equal (ZF=1 or SF!=OF)
+    Jg = 0xC05,  // Jump Greater (ZF=0 and SF=OF)
+    Jge = 0xC06, // Jump Greater or Equal (SF=OF)
+    Jl = 0xC07,  // Jump Less (SF!=OF)
+    Jle = 0xC08, // Jump Less or Equal (ZF=1 or SF!=OF)
 
     // Unsigned conditions
-    Ja = 0xC0D,  // Jump Above (CF=0 and ZF=0)
-    Jae = 0xC0E, // Jump Above or Equal (CF=0)
-    Jb = 0xC0F,  // Jump Below (CF=1)
-    Jbe = 0xC10, // Jump Below or Equal (CF=1 or ZF=1)
+    Ja = 0xC09,  // Jump Above (CF=0 and ZF=0)
+    Jae = 0xC0A, // Jump Above or Equal (CF=0)
+    Jb = 0xC0B,  // Jump Below (CF=1)
+    Jbe = 0xC0C, // Jump Below or Equal (CF=1 or ZF=1)
 
     // Other flag conditions
-    Jc = 0xC11,  // Jump If Carry (CF=1)
-    Jnc = 0xC12, // Jump If No Carry (CF=0)
-    Jo = 0xC13,  // Jump If Overflow (OF=1)
-    Jno = 0xC14, // Jump If No Overflow (OF=0)
-    Js = 0xC15,  // Jump Sign (SF=1)
-    Jns = 0xC16, // Jump No Sign (SF=0)
-    Jp = 0xC17,  // Jump Parity (PF=1)
-    Jnp = 0xC18, // Jump No Parity (PF=0)
+    Jc = 0xC0D,  // Jump If Carry (CF=1)
+    Jnc = 0xC0E, // Jump If No Carry (CF=0)
+    Jo = 0xC0F,  // Jump If Overflow (OF=1)
+    Jno = 0xC10, // Jump If No Overflow (OF=0)
+    Js = 0xC11,  // Jump Sign (SF=1)
+    Jns = 0xC12, // Jump No Sign (SF=0)
+    Jp = 0xC13,  // Jump Parity (PF=1)
+    Jnp = 0xC14, // Jump No Parity (PF=0)
 
     // Special conditions
-    Jxcz = 0xC19, // Jump if CX is Zero (does not check flags, checks a register)
+    Jxcz = 0xCFF, // Jump if CX is Zero (does not check flags, checks a register)
     Inspect = 0xFE,
     Halt = 0xFFFFFFFF,
 }

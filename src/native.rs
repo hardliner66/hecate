@@ -216,7 +216,7 @@ impl NativeCpu {
                     self.instruction_pointer += 1;
 
                     if self.verbose {
-                        println!("SET R{}, {}", reg, imm);
+                        println!("LOAD R{}, {}", reg, imm);
                     }
 
                     self.registers[reg as usize] = imm;
@@ -234,6 +234,20 @@ impl NativeCpu {
                     }
 
                     self.registers[reg as usize] = self.read_memory(addr)?;
+                    self.stats.cycles += 2;
+                }
+                Some(Bytecode::LoadReg) => {
+                    let reg1 = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let reg2 = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    if self.verbose {
+                        println!("LOAD R{}, R{}", reg1, reg2);
+                    }
+
+                    self.registers[reg1 as usize] = self.registers[reg2 as usize];
                     self.stats.cycles += 2;
                 }
                 Some(Bytecode::Store) => {
@@ -275,6 +289,25 @@ impl NativeCpu {
                     self.update_flags_add(a, b, result);
                     self.stats.cycles += 1;
                 }
+                Some(Bytecode::AddValue) => {
+                    let reg = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let imm = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let a = self.registers[reg as usize];
+                    let b = imm;
+                    let result = a.wrapping_add(b);
+
+                    if self.verbose {
+                        println!("ADD R{}({}), {} => {}", reg, a, b, result);
+                    }
+
+                    self.registers[reg as usize] = result;
+                    self.update_flags_add(a, b, result);
+                    self.stats.cycles += 1;
+                }
                 Some(Bytecode::Sub) => {
                     let reg1 = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
@@ -291,6 +324,25 @@ impl NativeCpu {
                     }
 
                     self.registers[reg1 as usize] = result;
+                    self.update_flags_sub(a, b, result);
+                    self.stats.cycles += 1;
+                }
+                Some(Bytecode::SubValue) => {
+                    let reg = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let imm = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let a = self.registers[reg as usize];
+                    let b = imm;
+                    let result = a.wrapping_sub(b);
+
+                    if self.verbose {
+                        println!("SUB R{}({}), {} => {}", reg, a, b, result);
+                    }
+
+                    self.registers[reg as usize] = result;
                     self.update_flags_sub(a, b, result);
                     self.stats.cycles += 1;
                 }
@@ -312,6 +364,29 @@ impl NativeCpu {
                     }
 
                     self.registers[reg1 as usize] = result;
+                    self.update_flags_mul(a, b, wide_result);
+
+                    // For cycle cost, just keep whatever logic you have; previously *4 was mentioned.
+                    self.stats.cycles *= 4;
+                }
+                Some(Bytecode::MulValue) => {
+                    let reg = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let imm = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let a = self.registers[reg as usize];
+                    let b = imm;
+
+                    let wide_result = (a as u64).wrapping_mul(b as u64);
+                    let result = wide_result as u32;
+
+                    if self.verbose {
+                        println!("MUL R{}({}), {} => {}", reg, a, b, result);
+                    }
+
+                    self.registers[reg as usize] = result;
                     self.update_flags_mul(a, b, wide_result);
 
                     // For cycle cost, just keep whatever logic you have; previously *4 was mentioned.
@@ -339,6 +414,33 @@ impl NativeCpu {
                     }
 
                     self.registers[reg1 as usize] = result;
+                    self.update_flags_div(a, b, result);
+
+                    // For cycle cost, previously *27 was mentioned.
+                    self.stats.cycles *= 27;
+                }
+                Some(Bytecode::DivValue) => {
+                    let reg = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let imm = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let a = self.registers[reg as usize];
+                    let b = imm;
+
+                    if b == 0 {
+                        return Err(ExecutionError::DivisionByZero);
+                    }
+
+                    // Perform unsigned division
+                    let result = a.wrapping_div(b);
+
+                    if self.verbose {
+                        println!("DIV R{}({}), {} => {}", reg, a, b, result);
+                    }
+
+                    self.registers[reg as usize] = result;
                     self.update_flags_div(a, b, result);
 
                     // For cycle cost, previously *27 was mentioned.
@@ -440,6 +542,28 @@ impl NativeCpu {
 
                     if self.verbose {
                         println!("CMP R{}({}), R{}({}) => (flags updated for {} - {})", reg1, a, reg2, b, a, b);
+                    }
+
+                    // Update flags as if we did SUB, but do not store result anywhere.
+                    self.update_flags_sub(a, b, result);
+
+                    self.stats.cycles += 1; // or however many cycles CMP should cost
+                }
+                Some(Bytecode::CmpValue) => {
+                    let reg = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let imm = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let a = self.registers[reg as usize];
+                    let b = imm;
+
+                    // Perform a subtraction in a temporary variable just to get flags.
+                    let result = a.wrapping_sub(b);
+
+                    if self.verbose {
+                        println!("CMP R{}({}), {} => (flags updated for {} - {})", reg, a, b, a, b);
                     }
 
                     // Update flags as if we did SUB, but do not store result anywhere.
@@ -607,5 +731,202 @@ impl NativeCpu {
 
         self.stack_pointer += 1;
         self.read_memory(self.stack_pointer)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*; // Use your CPU and Bytecode types from the parent module
+
+    // Helper function to run a small program and return the CPU state afterwards
+    fn run_program(program: &[u32], memory_size: u32, registers: u8) -> NativeCpu {
+        let mut cpu = NativeCpu::new(memory_size, registers);
+        cpu.load_memory(0, program);
+        cpu.execute(RunMode::Run).unwrap();
+        cpu
+    }
+
+    #[test]
+    fn test_nop() {
+        let program = &[Bytecode::Nop as u32, Bytecode::Halt as u32];
+
+        let cpu = run_program(program, 128, 4);
+        // Just check that nothing broke and IP advanced
+        assert_eq!(cpu.instruction_pointer, 2);
+    }
+
+    #[test]
+    fn test_load_value() {
+        let program = &[
+            Bytecode::LoadValue as u32,
+            0,  // R0
+            42, // value
+            Bytecode::Halt as u32,
+        ];
+
+        let cpu = run_program(program, 128, 4);
+        assert_eq!(cpu.get_registers()[0], 42);
+    }
+
+    #[test]
+    fn test_add() {
+        let program = &[
+            Bytecode::LoadValue as u32,
+            0,
+            5, // R0 = 5
+            Bytecode::LoadValue as u32,
+            1,
+            10, // R1 = 10
+            Bytecode::Add as u32,
+            0,
+            1, // R0 = R0 + R1
+            Bytecode::Halt as u32,
+        ];
+
+        let cpu = run_program(program, 128, 4);
+        assert_eq!(cpu.get_registers()[0], 15);
+        // Check flags if needed
+        // e.g. zero flag should be false:
+        assert!(!cpu.flags.zero);
+    }
+
+    #[test]
+    fn test_sub() {
+        let program = &[
+            Bytecode::LoadValue as u32,
+            0,
+            10, // R0 = 10
+            Bytecode::LoadValue as u32,
+            1,
+            5, // R1 = 5
+            Bytecode::Sub as u32,
+            0,
+            1, // R0 = R0 - R1 (10-5 =5)
+            Bytecode::Halt as u32,
+        ];
+
+        let cpu = run_program(program, 128, 4);
+        assert_eq!(cpu.get_registers()[0], 5);
+        assert!(!cpu.flags.zero);
+        assert!(!cpu.flags.sign);
+    }
+
+    #[test]
+    fn test_mul() {
+        let program = &[
+            Bytecode::LoadValue as u32,
+            0,
+            6, // R0 = 6
+            Bytecode::LoadValue as u32,
+            1,
+            7, // R1 = 7
+            Bytecode::Mul as u32,
+            0,
+            1, // R0 = R0 * R1 (6*7=42)
+            Bytecode::Halt as u32,
+        ];
+
+        let cpu = run_program(program, 128, 4);
+        assert_eq!(cpu.get_registers()[0], 42);
+    }
+
+    #[test]
+    fn test_div() {
+        let program = &[
+            Bytecode::LoadValue as u32,
+            0,
+            42,
+            Bytecode::LoadValue as u32,
+            1,
+            6,
+            Bytecode::Div as u32,
+            0,
+            1, // R0 = R0 / R1 = 42/6 =7
+            Bytecode::Halt as u32,
+        ];
+
+        let cpu = run_program(program, 128, 4);
+        assert_eq!(cpu.get_registers()[0], 7);
+    }
+
+    #[test]
+    fn test_cmp_je() {
+        // Note: The code above may need adjustments to align addresses.
+        // Let's place the jump target instructions right after HALT:
+        // We'll move them and just trust the indexing works out for this example.
+
+        // Actually, let's make it simpler. We'll jump ahead by fewer instructions:
+        let program = &[
+            Bytecode::LoadValue as u32,
+            0,
+            5,
+            Bytecode::LoadValue as u32,
+            1,
+            5,
+            Bytecode::Cmp as u32,
+            0,
+            1,
+            Bytecode::Je as u32,
+            15, // Jump to index 15
+            Bytecode::LoadValue as u32,
+            2,
+            100, // If not equal, R2=100
+            Bytecode::Halt as u32,
+            // Jump target (index 15):
+            Bytecode::LoadValue as u32,
+            2,
+            999,
+            Bytecode::Halt as u32,
+        ];
+
+        let cpu = run_program(program, 128, 4);
+        // Since R0 == R1, we jumped to the second LoadValue
+        assert_eq!(cpu.get_registers()[2], 999);
+    }
+
+    #[test]
+    fn test_stack_operations() {
+        let program = &[
+            Bytecode::PushValue as u32,
+            42, // Push 42 on stack
+            Bytecode::Pop as u32,
+            0, // Pop into R0 => R0=42
+            Bytecode::PushValue as u32,
+            10, // push 10
+            Bytecode::PushValue as u32,
+            20, // push 20
+            Bytecode::Pop as u32,
+            1, // pop into R1 => R1=20
+            Bytecode::Pop as u32,
+            2, // pop into R2 => R2=10
+            Bytecode::Halt as u32,
+        ];
+
+        let cpu = run_program(program, 128, 4);
+        let regs = cpu.get_registers();
+        assert_eq!(regs[0], 42);
+        assert_eq!(regs[1], 20);
+        assert_eq!(regs[2], 10);
+    }
+
+    #[test]
+    fn test_store_load_memory() {
+        let program = &[
+            Bytecode::LoadValue as u32,
+            0,
+            123, // R0=123
+            Bytecode::Store as u32,
+            50,
+            0, // memory[50]=R0=123
+            Bytecode::LoadMemory as u32,
+            1,
+            50, // R1=memory[50] = 123
+            Bytecode::Halt as u32,
+        ];
+
+        let cpu = run_program(program, 128, 4);
+        let regs = cpu.get_registers();
+        assert_eq!(regs[1], 123);
+        assert_eq!(cpu.get_memory()[50], 123);
     }
 }

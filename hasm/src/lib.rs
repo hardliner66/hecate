@@ -33,6 +33,7 @@ struct ParsedLine {
 /// Parse registers like "R0" -> 0.
 fn parse_register(s: &str) -> Result<u32, AssembleError> {
     if !(s.starts_with('R') || s.starts_with('r')) {
+        println!("{s}");
         return Err(AssembleError::InvalidRegister(s.to_string()));
     }
     let reg_part = &s[1..];
@@ -209,17 +210,23 @@ pub fn assemble_program(program: &str) -> Result<Vec<u32>, AssembleError> {
                 if tokens.len() < 3 {
                     return Err(AssembleError::MissingArgument(format!("{:?}", tokens)));
                 }
-                let r = reg_arg(&tokens[1])?;
+                let r = reg_arg(tokens[1].trim())?;
                 let second = &tokens[2];
                 if second.starts_with('@') {
                     // LoadMemory
-                    let a = addr_arg(second)?;
+                    let a = addr_arg(second.trim())?;
                     code.push(Bytecode::LoadMemory.to_u32().unwrap());
+                    code.push(r);
+                    code.push(a);
+                } else if second.starts_with('R') {
+                    // LoadMemory
+                    let a = reg_arg(second.trim())?;
+                    code.push(Bytecode::LoadReg.to_u32().unwrap());
                     code.push(r);
                     code.push(a);
                 } else {
                     // LoadValue
-                    let i = imm_arg(second)?;
+                    let i = imm_arg(second.trim())?;
                     code.push(Bytecode::LoadValue.to_u32().unwrap());
                     code.push(r);
                     code.push(i);
@@ -263,14 +270,49 @@ pub fn assemble_program(program: &str) -> Result<Vec<u32>, AssembleError> {
                 if tokens.len() < 3 {
                     return Err(AssembleError::MissingArgument(format!("{:?}", tokens)));
                 }
+                let use_register = tokens[2].starts_with("R");
                 let r1 = reg_arg(&tokens[1])?;
-                let r2 = reg_arg(&tokens[2])?;
+                let r2 = if use_register {
+                    reg_arg(&tokens[2])?
+                } else {
+                    imm_arg(&tokens[2])?
+                };
                 let op = match mnemonic.as_str() {
-                    "add" => Bytecode::Add,
-                    "sub" => Bytecode::Sub,
-                    "mul" => Bytecode::Mul,
-                    "div" => Bytecode::Div,
-                    "cmp" => Bytecode::Cmp,
+                    "add" => {
+                        if use_register {
+                            Bytecode::Add
+                        } else {
+                            Bytecode::AddValue
+                        }
+                    }
+                    "sub" => {
+                        if use_register {
+                            Bytecode::Sub
+                        } else {
+                            Bytecode::SubValue
+                        }
+                    }
+                    "mul" => {
+                        if use_register {
+                            Bytecode::Mul
+                        } else {
+                            Bytecode::MulValue
+                        }
+                    }
+                    "div" => {
+                        if use_register {
+                            Bytecode::Div
+                        } else {
+                            Bytecode::DivValue
+                        }
+                    }
+                    "cmp" => {
+                        if use_register {
+                            Bytecode::Cmp
+                        } else {
+                            Bytecode::CmpValue
+                        }
+                    }
                     _ => unreachable!(),
                 };
                 code.push(op.to_u32().unwrap());

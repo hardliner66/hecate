@@ -1,23 +1,24 @@
-; This program computes factorial of R0 in a loop
-; Assume R0 is the input
-; R1 = result
+main:
+	;	Find factorial for the initial value of R2,
+	load R2, 5
 
-start:
-load R1, 1     ; R1 = 1
-cmp R0, R0
-je @end         ; if R0 == 0, skip loop
+	;	Copy the initial value of R2 to R0,
+	;	R0 is our factorial result
+	load R0, R2
+    call @loop
+	; Display the message and exit
+	store @1000, R0
+    inspect @1000
+    halt
 
 loop:
-mul R1, R0
-load R2, 1
-sub R0, R2
-load R2, 0
-cmp R0, R2
-jne @loop
+	;	If the counter is less or equal to 1, finish
+	cmp R2, 1
+	jle @end
+
+	sub R2, 1
+	mul R0, R2
+	jmp @loop
 
 end:
-; Move R1 into R0 (push/pop trick)
-push R1
-pop R0
-
-halt
+    ret
