@@ -1,11 +1,99 @@
 use common::{Bytecode, CpuStats, CpuTrait, ExecutionError, RunMode};
 use num_traits::FromPrimitive;
 
-const CYCLES_WRITE_MEMORY: usize = 1;
-const CYCLES_ACCESS_L1: usize = 3;
-const CYCLES_ACCESS_L2: usize = 11;
-const CYCLES_ACCESS_L3: usize = 50;
-const CYCLES_ACCESS_MEMORY: usize = 125;
+// Constants for latencies:
+const L1_LATENCY: usize = 3;
+const L2_LATENCY: usize = 11;
+const L3_LATENCY: usize = 50;
+const MEMORY_LATENCY: usize = 125;
+const AVERAGE_STORE_LATENCY: usize = 1; // Minimal overhead once line is in L1
+
+const LINE_SIZE: u32 = 64;
+const L1_SETS: usize = 64;
+const L1_WAYS: usize = 4;
+const L2_SETS: usize = 256;
+const L2_WAYS: usize = 8;
+const L3_SETS: usize = 1024;
+const L3_WAYS: usize = 16;
+
+#[derive(Debug, Clone)]
+struct CacheLine {
+    valid: bool,
+    tag: u32,
+}
+
+impl Default for CacheLine {
+    fn default() -> Self {
+        Self {
+            valid: false,
+            tag: 0,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct Cache {
+    sets: Vec<Vec<CacheLine>>,
+    sets_mask: u32,
+    line_offset_bits: u32,
+    tag_shift: u32,
+    latency: usize,
+}
+
+impl Cache {
+    fn new(num_sets: usize, ways: usize, line_size: u32, latency: usize) -> Self {
+        let line_offset_bits = line_size.trailing_zeros();
+        let set_count = num_sets as u32;
+        let set_index_bits = set_count.trailing_zeros();
+
+        let sets = vec![vec![CacheLine::default(); ways]; num_sets];
+
+        Self {
+            sets,
+            sets_mask: set_count - 1,
+            line_offset_bits,
+            tag_shift: line_offset_bits + set_index_bits,
+            latency,
+        }
+    }
+
+    fn access(&mut self, address: u32, tag: u32) -> Option<usize> {
+        let set_index = ((address >> self.line_offset_bits) & self.sets_mask) as usize;
+        let set = &mut self.sets[set_index];
+
+        if let Some(pos) = set.iter().position(|line| line.valid && line.tag == tag) {
+            // Hit. Move line to front for LRU policy
+            let line = set.remove(pos);
+            set.insert(0, line);
+            return Some(self.latency);
+        }
+
+        None
+    }
+
+    fn insert_line(&mut self, address: u32, tag: u32) {
+        let set_index = ((address >> self.line_offset_bits) & self.sets_mask) as usize;
+        let set = &mut self.sets[set_index];
+
+        // Evict LRU (end of vector)
+        let mut evict_line = set.pop().unwrap();
+        evict_line.valid = true;
+        evict_line.tag = tag;
+
+        // Insert as MRU
+        set.insert(0, evict_line);
+    }
+
+    fn line_tag(&self, address: u32) -> u32 {
+        address >> self.tag_shift
+    }
+}
+
+#[derive(Debug)]
+enum MemoryAccessDirection {
+    Load,
+    Store,
+}
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Flags {
@@ -22,15 +110,11 @@ pub struct NativeCpu {
     instruction_pointer: u32,
     stack_pointer: u32, // Stack pointer
     verbose: bool,
-    l1_start: u32,
-    l1_size: u32,
-    l2_start: u32,
-    l2_size: u32,
-    l3_start: u32,
-    l3_size: u32,
-    last_accessed_address: Option<u32>,
     stats: CpuStats,
     flags: Flags,
+    l1: Cache,
+    l2: Cache,
+    l3: Cache,
 }
 
 impl CpuTrait for NativeCpu {
@@ -69,16 +153,69 @@ impl NativeCpu {
             registers: vec![0; registers as usize],
             instruction_pointer: 0,
             stack_pointer: memory_size - 1, // Stack starts at the top of memory
-            last_accessed_address: None,
             verbose: false,
-            l1_start: 0,
-            l1_size: (64 * 1024) / 32, // 64 KB L1 cache
-            l2_start: 0,
-            l2_size: (256 * 1024) / 32, // 256 KB L2 cache
-            l3_start: 0,
-            l3_size: (1024 * 1024) / 32, // 1 MB L3 cache
             stats: CpuStats::default(),
             flags: Flags::default(),
+            l1: Cache::new(L1_SETS, L1_WAYS, LINE_SIZE, L1_LATENCY),
+            l2: Cache::new(L2_SETS, L2_WAYS, LINE_SIZE, L2_LATENCY),
+            l3: Cache::new(L3_SETS, L3_WAYS, LINE_SIZE, L3_LATENCY),
+        }
+    }
+
+    fn access(&mut self, address: u32, direction: MemoryAccessDirection) -> usize {
+        self.stats.memory_access_count += 1;
+        let tag_l1 = self.l1.line_tag(address);
+
+        // Check L1
+        if let Some(_l1_lat) = self.l1.access(address, tag_l1) {
+            self.stats.cache_hits.l1 += 1;
+            // L1 hit
+            // If load: cost = L1_LATENCY
+            // If store: cost = SIMPLIFIED_STORE_LATENCY
+            return match direction {
+                MemoryAccessDirection::Load => L1_LATENCY,
+                MemoryAccessDirection::Store => AVERAGE_STORE_LATENCY,
+            };
+        }
+
+        let tag_l2 = self.l2.line_tag(address);
+
+        // L1 miss, check L2
+        if let Some(_l2_lat) = self.l2.access(address, tag_l2) {
+            self.stats.cache_hits.l2 += 1;
+            // L2 hit: bring line to L1
+            self.l1.insert_line(address, tag_l1);
+
+            return match direction {
+                MemoryAccessDirection::Load => L2_LATENCY,
+                MemoryAccessDirection::Store => AVERAGE_STORE_LATENCY,
+            };
+        }
+
+        let tag_l3 = self.l3.line_tag(address);
+
+        // L2 miss, check L3
+        if let Some(_l3_lat) = self.l3.access(address, tag_l3) {
+            self.stats.cache_hits.l3 += 1;
+            // L3 hit: bring line into L2 and L1
+            self.l2.insert_line(address, tag_l2);
+            self.l1.insert_line(address, tag_l1);
+
+            return match direction {
+                MemoryAccessDirection::Load => L3_LATENCY,
+                MemoryAccessDirection::Store => AVERAGE_STORE_LATENCY,
+            };
+        }
+
+        // Miss in all caches, fetch from memory
+        // Insert line into L3, L2, L1
+        self.l3.insert_line(address, tag_l3);
+        self.l2.insert_line(address, tag_l2);
+        self.l1.insert_line(address, tag_l1);
+
+        match direction {
+            MemoryAccessDirection::Load => MEMORY_LATENCY,
+            MemoryAccessDirection::Store => AVERAGE_STORE_LATENCY,
         }
     }
 
@@ -622,77 +759,6 @@ impl NativeCpu {
         Ok(self.stats)
     }
 
-    fn update_cache(last_accessed_address: Option<u32>, address: u32, start: &mut u32, size: u32) {
-        *start = address.saturating_sub(size / 2);
-        if let Some(last) = last_accessed_address {
-            match last.cmp(&address) {
-                std::cmp::Ordering::Less => {
-                    *start = last;
-                }
-                std::cmp::Ordering::Greater => {
-                    *start = last.saturating_sub(size);
-                }
-                _ => {}
-            }
-        }
-    }
-
-    fn track_memory_access(&mut self, address: u32) {
-        self.stats.memory_access_count += 1;
-        if address >= self.l1_start && address < self.l1_start + self.l1_size {
-            self.stats.cycles += CYCLES_ACCESS_L1;
-            self.last_accessed_address = Some(address);
-            self.stats.cache_hits.l1 += 1;
-        } else if address >= self.l2_start && address < self.l2_start + self.l2_size {
-            Self::update_cache(
-                self.last_accessed_address,
-                address,
-                &mut self.l1_start,
-                self.l1_size,
-            );
-            self.stats.cache_hits.l2 += 1;
-            self.stats.cycles += CYCLES_ACCESS_L2;
-            self.last_accessed_address = Some(address);
-        } else if address >= self.l3_start && address < self.l3_start + self.l3_size {
-            Self::update_cache(
-                self.last_accessed_address,
-                address,
-                &mut self.l1_start,
-                self.l1_size,
-            );
-            Self::update_cache(
-                self.last_accessed_address,
-                address,
-                &mut self.l2_start,
-                self.l2_size,
-            );
-            self.stats.cache_hits.l3 += 1;
-            self.stats.cycles += CYCLES_ACCESS_L3;
-            self.last_accessed_address = Some(address);
-        } else {
-            Self::update_cache(
-                self.last_accessed_address,
-                address,
-                &mut self.l1_start,
-                self.l1_size,
-            );
-            Self::update_cache(
-                self.last_accessed_address,
-                address,
-                &mut self.l2_start,
-                self.l2_size,
-            );
-            Self::update_cache(
-                self.last_accessed_address,
-                address,
-                &mut self.l3_start,
-                self.l3_size,
-            );
-            self.last_accessed_address = Some(address);
-            self.stats.cycles += CYCLES_ACCESS_MEMORY;
-        }
-    }
-
     fn valid_address(&self, address: u32) -> Result<(), ExecutionError> {
         if (address as usize) < self.memory.len() {
             Ok(())
@@ -703,13 +769,15 @@ impl NativeCpu {
 
     fn read_memory(&mut self, address: u32) -> Result<u32, ExecutionError> {
         self.valid_address(address)?;
-        self.track_memory_access(address);
+        let cost = self.access(address, MemoryAccessDirection::Load);
+        self.stats.cycles += cost;
         Ok(self.memory[address as usize])
     }
 
     fn write_memory(&mut self, address: u32, value: u32) -> Result<(), ExecutionError> {
         self.valid_address(address)?;
-        self.stats.cycles += CYCLES_WRITE_MEMORY;
+        let cost = self.access(address, MemoryAccessDirection::Store);
+        self.stats.cycles += cost;
         self.memory[address as usize] = value;
         Ok(())
     }
