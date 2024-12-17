@@ -115,6 +115,10 @@ pub struct NativeCpu {
     l1: Cache,
     l2: Cache,
     l3: Cache,
+
+    // Prefetch-related fields
+    last_load_addresses: Vec<u32>, // keep track of recent load addresses
+    stable_stride: Option<i32>,    // detected stable stride if any
 }
 
 impl CpuTrait for NativeCpu {
@@ -159,6 +163,9 @@ impl NativeCpu {
             l1: Cache::new(L1_SETS, L1_WAYS, LINE_SIZE, L1_LATENCY),
             l2: Cache::new(L2_SETS, L2_WAYS, LINE_SIZE, L2_LATENCY),
             l3: Cache::new(L3_SETS, L3_WAYS, LINE_SIZE, L3_LATENCY),
+
+            last_load_addresses: Vec::new(),
+            stable_stride: None,
         }
     }
 
@@ -167,13 +174,14 @@ impl NativeCpu {
         let tag_l1 = self.l1.line_tag(address);
 
         // Check L1
-        if let Some(_l1_lat) = self.l1.access(address, tag_l1) {
+        if let Some(l1_lat) = self.l1.access(address, tag_l1) {
+            if self.verbose {
+                println!("L1 HIT @{:#02x}", address);
+            }
             self.stats.cache_hits.l1 += 1;
             // L1 hit
-            // If load: cost = L1_LATENCY
-            // If store: cost = SIMPLIFIED_STORE_LATENCY
             return match direction {
-                MemoryAccessDirection::Load => L1_LATENCY,
+                MemoryAccessDirection::Load => l1_lat,
                 MemoryAccessDirection::Store => AVERAGE_STORE_LATENCY,
             };
         }
@@ -181,13 +189,16 @@ impl NativeCpu {
         let tag_l2 = self.l2.line_tag(address);
 
         // L1 miss, check L2
-        if let Some(_l2_lat) = self.l2.access(address, tag_l2) {
+        if let Some(l2_lat) = self.l2.access(address, tag_l2) {
+            if self.verbose {
+                println!("L2 HIT @{:#02x}", address);
+            }
             self.stats.cache_hits.l2 += 1;
             // L2 hit: bring line to L1
             self.l1.insert_line(address, tag_l1);
 
             return match direction {
-                MemoryAccessDirection::Load => L2_LATENCY,
+                MemoryAccessDirection::Load => l2_lat,
                 MemoryAccessDirection::Store => AVERAGE_STORE_LATENCY,
             };
         }
@@ -195,16 +206,23 @@ impl NativeCpu {
         let tag_l3 = self.l3.line_tag(address);
 
         // L2 miss, check L3
-        if let Some(_l3_lat) = self.l3.access(address, tag_l3) {
+        if let Some(l3_lat) = self.l3.access(address, tag_l3) {
+            if self.verbose {
+                println!("L3 HIT @{:#02x}", address);
+            }
             self.stats.cache_hits.l3 += 1;
             // L3 hit: bring line into L2 and L1
             self.l2.insert_line(address, tag_l2);
             self.l1.insert_line(address, tag_l1);
 
             return match direction {
-                MemoryAccessDirection::Load => L3_LATENCY,
+                MemoryAccessDirection::Load => l3_lat,
                 MemoryAccessDirection::Store => AVERAGE_STORE_LATENCY,
             };
+        }
+
+        if self.verbose {
+            println!("CACHE MISS @{:#02x}", address);
         }
 
         // Miss in all caches, fetch from memory
@@ -217,6 +235,113 @@ impl NativeCpu {
             MemoryAccessDirection::Load => MEMORY_LATENCY,
             MemoryAccessDirection::Store => AVERAGE_STORE_LATENCY,
         }
+    }
+
+    fn detect_stride(&mut self) {
+        // We want to detect a stable stride from recent load addresses
+        // Let's say we need at least 4 load addresses to guess a pattern.
+        if self.last_load_addresses.len() < 4 {
+            self.stable_stride = None;
+            return;
+        }
+
+        // Consider last 4 addresses to detect a pattern
+        let len = self.last_load_addresses.len();
+        let a1 = self.last_load_addresses[len - 4];
+        let a2 = self.last_load_addresses[len - 3];
+        let a3 = self.last_load_addresses[len - 2];
+        let a4 = self.last_load_addresses[len - 1];
+
+        let d1 = a2 as i32 - a1 as i32;
+        let d2 = a3 as i32 - a2 as i32;
+        let d3 = a4 as i32 - a3 as i32;
+
+        // Check if strides are consistent
+        if d1 == d2 && d2 == d3 {
+            // We have a stable stride
+            self.stable_stride = Some(d1);
+        } else {
+            self.stable_stride = None;
+        }
+    }
+    fn prefetch_lines(&mut self, current_address: u32) {
+        // If no stable stride, no prefetch
+        let stride = match self.stable_stride {
+            Some(s) => s,
+            None => return,
+        };
+
+        if stride == 0 {
+            return; // no stride to prefetch
+        }
+
+        // How many lines to prefetch?
+        // For example, let's prefetch 2 lines ahead if stride is positive.
+        // We'll assume stride is in bytes. We'll compute next addresses by adding stride.
+        // Ensure stride moves forward. If stride is negative, we could still prefetch backwards,
+        // but that doesn't make much sense. We'll just handle positive stride for simplicity.
+        if stride > 0 {
+            // Prefetch up to 2 lines ahead
+            // Convert stride from bytes to addresses.
+            // Actually, here stride is just difference in addresses (each address is 1 'unit'?),
+            // We'll assume memory addresses represent indexes, each 4 bytes per u32.
+            // If your addresses are byte addresses, stride is already in bytes.
+            // Our code uses addresses as indexes into memory (u32).
+            // Let's consider the stride we found is in terms of these 'word' addresses (since we do a4-a3).
+            // If we want line-based prefetching, we should align to LINE_SIZE/4 words per line
+            // (because each entry in memory is u32 and line_size=64 bytes = 16 words).
+
+            let words_per_line = (LINE_SIZE / 4) as i32;
+            // We have a stride in words (since addresses are u32 indexes),
+            // Prefetching next 2 lines means:
+            // next_line_address = current_address + stride
+            // second_line_address = current_address + stride + words_per_line
+            // We'll try a heuristic: if stride > 0, prefetch the next line at current + stride and maybe one more line after that.
+
+            let next_line_address = ((current_address as i32) + stride) as u32;
+            let second_line_address = ((current_address as i32) + stride + words_per_line) as u32;
+
+            // Prefetch both lines. Treat them as loads.
+            // We ignore the cost here, as this is normally done by the hardware in the background
+            _ = self.access(next_line_address, MemoryAccessDirection::Load);
+            _ = self.access(second_line_address, MemoryAccessDirection::Load);
+        }
+    }
+
+    fn update_load_history(&mut self, address: u32) {
+        self.last_load_addresses.push(address);
+        if self.last_load_addresses.len() > 16 {
+            self.last_load_addresses.remove(0); // Keep a small history
+        }
+        self.detect_stride();
+    }
+
+    fn read_memory(&mut self, address: u32) -> Result<u32, ExecutionError> {
+        self.valid_address(address)?;
+        if self.verbose {
+            println!("READ @{:#02x}", address);
+        }
+        let cost = self.access(address, MemoryAccessDirection::Load);
+        self.stats.cycles += cost;
+
+        // Update load pattern history
+        self.update_load_history(address);
+
+        // Attempt prefetching if a pattern is found
+        self.prefetch_lines(address);
+
+        Ok(self.memory[address as usize])
+    }
+
+    fn write_memory(&mut self, address: u32, value: u32) -> Result<(), ExecutionError> {
+        self.valid_address(address)?;
+        if self.verbose {
+            println!("WRITE @{:#02x}, {}", address, value);
+        }
+        let cost = self.access(address, MemoryAccessDirection::Store);
+        self.stats.cycles += cost;
+        self.memory[address as usize] = value;
+        Ok(())
     }
 
     fn update_flags_mul(&mut self, _a: u32, _b: u32, result: u64) {
@@ -293,6 +418,7 @@ impl NativeCpu {
             _ => false,
         }
     }
+
     fn update_flags_add(&mut self, a: u32, b: u32, result: u32) {
         // Zero flag
         self.flags.zero = result == 0;
@@ -765,21 +891,6 @@ impl NativeCpu {
         } else {
             Err(ExecutionError::InvalidMemoryLocation)
         }
-    }
-
-    fn read_memory(&mut self, address: u32) -> Result<u32, ExecutionError> {
-        self.valid_address(address)?;
-        let cost = self.access(address, MemoryAccessDirection::Load);
-        self.stats.cycles += cost;
-        Ok(self.memory[address as usize])
-    }
-
-    fn write_memory(&mut self, address: u32, value: u32) -> Result<(), ExecutionError> {
-        self.valid_address(address)?;
-        let cost = self.access(address, MemoryAccessDirection::Store);
-        self.stats.cycles += cost;
-        self.memory[address as usize] = value;
-        Ok(())
     }
 
     fn push_stack(&mut self, value: u32) -> Result<(), ExecutionError> {
