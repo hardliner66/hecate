@@ -103,8 +103,28 @@ pub struct Flags {
     pub overflow: bool,
 }
 
+pub trait HostIO: std::fmt::Debug {
+    fn syscall(&mut self, code: u32, cpu: &mut NativeCpu<Self>) -> Result<usize, ExecutionError>
+    where
+        Self: Sized;
+}
+
 #[derive(Debug)]
-pub struct NativeCpu {
+pub struct NullHostIO;
+
+impl HostIO for NullHostIO {
+    fn syscall(
+        &mut self,
+        _code: u32,
+        _cpu: &mut NativeCpu<NullHostIO>,
+    ) -> Result<usize, ExecutionError> {
+        // Default: do nothing or return an error
+        Ok(0)
+    }
+}
+
+#[derive(Debug)]
+pub struct NativeCpu<IO: HostIO> {
     memory: Vec<u32>,
     registers: Vec<u32>,
     instruction_pointer: u32,
@@ -119,9 +139,10 @@ pub struct NativeCpu {
     // Prefetch-related fields
     last_load_addresses: Vec<u32>, // keep track of recent load addresses
     stable_stride: Option<i32>,    // detected stable stride if any
+    host_io: Option<IO>,
 }
 
-impl CpuTrait for NativeCpu {
+impl<IO: HostIO> CpuTrait for NativeCpu<IO> {
     type Size = u32;
 
     fn set_verbose(&mut self, verbose: bool) {
@@ -150,8 +171,8 @@ impl CpuTrait for NativeCpu {
     }
 }
 
-impl NativeCpu {
-    pub fn new(memory_size: u32, registers: u8) -> Self {
+impl<IO: HostIO> NativeCpu<IO> {
+    pub fn new(memory_size: u32, registers: u8, host_io: IO) -> Self {
         Self {
             memory: vec![0; memory_size as usize],
             registers: vec![0; registers as usize],
@@ -166,6 +187,7 @@ impl NativeCpu {
 
             last_load_addresses: Vec::new(),
             stable_stride: None,
+            host_io: Some(host_io),
         }
     }
 
@@ -461,6 +483,60 @@ impl NativeCpu {
         self.flags.overflow = (a_sign != b_sign) && (r_sign != a_sign);
     }
 
+    fn read_byte(&mut self, address: u32) -> Result<u8, ExecutionError> {
+        self.valid_address(address)?;
+        let cost = self.access(address, MemoryAccessDirection::Load);
+        self.stats.cycles += cost;
+
+        // Careful: currently memory is Vec<u32>. To access a byte, you need a scheme:
+        // Option 1: Make memory a Vec<u8> instead. Then each address maps directly to a byte.
+        // Option 2: If keeping Vec<u32>, address*4 is the byte index. Let's assume each memory address = 1 word (u32).
+        // For byte granularity, we must multiply addresses by 4:
+        let byte_index = (address as usize) * 4;
+        if byte_index + 1 > self.memory.len() * 4 {
+            return Err(ExecutionError::InvalidMemoryLocation);
+        }
+
+        let mem_as_bytes = unsafe {
+            std::slice::from_raw_parts(self.memory.as_ptr() as *const u8, self.memory.len() * 4)
+        };
+        Ok(mem_as_bytes[byte_index])
+    }
+
+    fn write_byte(&mut self, address: u32, value: u8) -> Result<(), ExecutionError> {
+        self.valid_address(address)?;
+        let cost = self.access(address, MemoryAccessDirection::Store);
+        self.stats.cycles += cost;
+
+        let byte_index = (address as usize) * 4;
+        if byte_index + 1 > self.memory.len() * 4 {
+            return Err(ExecutionError::InvalidMemoryLocation);
+        }
+
+        let mem_as_bytes = unsafe {
+            std::slice::from_raw_parts_mut(
+                self.memory.as_mut_ptr() as *mut u8,
+                self.memory.len() * 4,
+            )
+        };
+        mem_as_bytes[byte_index] = value;
+        Ok(())
+    }
+
+    fn update_flags_float(&mut self, a: f32, b: f32) {
+        // Zero flag: a == b (but beware NaNs: if either is NaN, a == b is false)
+        self.flags.zero = (a == b) && a.is_finite() && b.is_finite();
+
+        // Sign flag: a < b
+        self.flags.sign = a < b;
+
+        // Overflow flag: Set if a or b is not finite (NaN or Infinity)
+        self.flags.overflow = !(a.is_finite() && b.is_finite());
+
+        // Carry flag: Clear it (no meaning in floats)
+        self.flags.carry = false;
+    }
+
     fn run(&mut self, cycles: isize) -> Result<CpuStats, ExecutionError> {
         let mut executed = 0;
 
@@ -471,6 +547,16 @@ impl NativeCpu {
             self.instruction_pointer += 1;
 
             match Bytecode::from_u32(opcode) {
+                Some(Bytecode::Syscall) => {
+                    let code = self.registers[0]; // Syscall code in R0
+                    if self.verbose {
+                        println!("SYSCALL code={}", code);
+                    }
+
+                    let mut host_io = self.host_io.take().unwrap();
+                    self.stats.cycles += host_io.syscall(code, self)?;
+                    self.host_io.replace(host_io);
+                }
                 Some(Bytecode::LoadValue) => {
                     let reg = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
@@ -527,6 +613,29 @@ impl NativeCpu {
                     self.write_memory(addr, self.registers[reg as usize])?;
                     self.stats.cycles += 2;
                 }
+                Some(Bytecode::LoadByte) => {
+    let reg = self.read_memory(self.instruction_pointer)?;
+    self.instruction_pointer += 1;
+
+    let addr = self.read_memory(self.instruction_pointer)?;
+    self.instruction_pointer += 1;
+
+    let byte = self.read_byte(addr)?;
+    self.registers[reg as usize] = byte as u32; // store in a register as u32
+    self.stats.cycles += 1;
+}
+
+Some(Bytecode::StoreByte) => {
+    let addr = self.read_memory(self.instruction_pointer)?;
+    self.instruction_pointer += 1;
+
+    let reg = self.read_memory(self.instruction_pointer)?;
+    self.instruction_pointer += 1;
+
+    let value = (self.registers[reg as usize] & 0xFF) as u8; // low 8 bits
+    self.write_byte(addr, value)?;
+    self.stats.cycles += 1;
+}
                 Some(Bytecode::Inspect) => {
                     let addr = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
@@ -571,6 +680,44 @@ impl NativeCpu {
                     self.update_flags_add(a, b, result);
                     self.stats.cycles += 1;
                 }
+                Some(Bytecode::FAdd) => {
+                    let reg1 = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let reg2 = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let a = f32::from_bits(self.registers[reg1 as usize]);
+                    let b = f32::from_bits(self.registers[reg2 as usize]);
+                    let result = a + b;
+
+                    if self.verbose {
+                        println!("FADD R{}({}), R{}({}) => {}", reg1, a, reg2, b, result);
+                    }
+
+                    self.registers[reg1 as usize] = result.to_bits();
+                    self.update_flags_float(a, b);
+                    self.stats.cycles += 2;
+                }
+                Some(Bytecode::FAddValue) => {
+                    let reg = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let imm = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let a = f32::from_bits(self.registers[reg as usize]);
+                    let b = f32::from_bits(imm);
+                    let result = a + b;
+
+                    if self.verbose {
+                        println!("FADD R{}({}), {} => {}", reg, a, b, result);
+                    }
+
+                    self.registers[reg as usize] = result.to_bits();
+                    self.update_flags_float(a, b);
+                    self.stats.cycles += 2;
+                }
                 Some(Bytecode::Sub) => {
                     let reg1 = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
@@ -608,6 +755,44 @@ impl NativeCpu {
                     self.registers[reg as usize] = result;
                     self.update_flags_sub(a, b, result);
                     self.stats.cycles += 1;
+                }
+                Some(Bytecode::FSub) => {
+                    let reg1 = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let reg2 = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let a = f32::from_bits(self.registers[reg1 as usize]);
+                    let b = f32::from_bits(self.registers[reg2 as usize]);
+                    let result = a - b;
+
+                    if self.verbose {
+                        println!("FSUB R{}({}), R{}({}) => {}", reg1, a, reg2, b, result);
+                    }
+
+                    self.registers[reg1 as usize] = result.to_bits();
+                    self.update_flags_float(a, b);
+                    self.stats.cycles += 2;
+                }
+                Some(Bytecode::FSubValue) => {
+                    let reg = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let imm = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let a = f32::from_bits(self.registers[reg as usize]);
+                    let b = f32::from_bits(imm);
+                    let result = a - b;
+
+                    if self.verbose {
+                        println!("FSUB R{}({}), {} => {}", reg, a, b, result);
+                    }
+
+                    self.registers[reg as usize] = result.to_bits();
+                    self.update_flags_float(a, b);
+                    self.stats.cycles += 2;
                 }
                 Some(Bytecode::Mul) => {
                     let reg1 = self.read_memory(self.instruction_pointer)?;
@@ -654,6 +839,44 @@ impl NativeCpu {
 
                     // For cycle cost, just keep whatever logic you have; previously *4 was mentioned.
                     self.stats.cycles *= 4;
+                }
+                Some(Bytecode::FMul) => {
+                    let reg1 = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let reg2 = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let a = f32::from_bits(self.registers[reg1 as usize]);
+                    let b = f32::from_bits(self.registers[reg2 as usize]);
+                    let result = a * b;
+
+                    if self.verbose {
+                        println!("FMUL R{}({}), R{}({}) => {}", reg1, a, reg2, b, result);
+                    }
+
+                    self.registers[reg1 as usize] = result.to_bits();
+                    self.update_flags_float(a, b);
+                    self.stats.cycles += 4;
+                }
+                Some(Bytecode::FMulValue) => {
+                    let reg = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let imm = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let a = f32::from_bits(self.registers[reg as usize]);
+                    let b = f32::from_bits(imm);
+                    let result = a * b;
+
+                    if self.verbose {
+                        println!("FMUL R{}({}), {} => {}", reg, a, b, result);
+                    }
+
+                    self.registers[reg as usize] = result.to_bits();
+                    self.update_flags_float(a, b);
+                    self.stats.cycles += 4;
                 }
                 Some(Bytecode::Div) => {
                     let reg1 = self.read_memory(self.instruction_pointer)?;
@@ -708,6 +931,54 @@ impl NativeCpu {
 
                     // For cycle cost, previously *27 was mentioned.
                     self.stats.cycles *= 27;
+                }
+                Some(Bytecode::FDiv) => {
+                    let reg1 = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let reg2 = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let a = f32::from_bits(self.registers[reg1 as usize]);
+                    let b = f32::from_bits(self.registers[reg2 as usize]);
+
+                    if b == 0.0 {
+                        return Err(ExecutionError::DivisionByZero);
+                    }
+
+                    let result = a / b;
+
+                    if self.verbose {
+                        println!("FDIV R{}({}), R{}({}) => {}", reg1, a, reg2, b, result);
+                    }
+
+                    self.registers[reg1 as usize] = result.to_bits();
+                    self.update_flags_float(a, b);
+                    self.stats.cycles += 4;
+                }
+                Some(Bytecode::FDivValue) => {
+                    let reg = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let imm = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let a = f32::from_bits(self.registers[reg as usize]);
+                    let b = f32::from_bits(imm);
+
+                    if b == 0.0 {
+                        return Err(ExecutionError::DivisionByZero);
+                    }
+
+                    let result = a / b;
+
+                    if self.verbose {
+                        println!("FDIV R{}({}), {} => {}", reg, a, b, result);
+                    }
+
+                    self.registers[reg as usize] = result.to_bits();
+                    self.update_flags_float(a, b);
+                    self.stats.cycles += 4;
                 }
                 Some(Bytecode::Jmp) => {
                     let imm = self.read_memory(self.instruction_pointer)?;
@@ -812,6 +1083,25 @@ impl NativeCpu {
 
                     self.stats.cycles += 1; // or however many cycles CMP should cost
                 }
+                Some(Bytecode::FCmp) => {
+                    let reg1 = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let reg2 = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let a = f32::from_bits(self.registers[reg1 as usize]);
+                    let b = f32::from_bits(self.registers[reg2 as usize]);
+
+                    if self.verbose {
+                        println!("FCMP R{}({}), R{}({}) => (flags updated for {} - {})", reg1, a, reg2, b, a, b);
+                    }
+
+                    // Update flags as if we did SUB, but do not store result anywhere.
+                    self.update_flags_float(a, b);
+
+                    self.stats.cycles += 1; // or however many cycles CMP should cost
+                }
                 Some(Bytecode::CmpValue) => {
                     let reg = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
@@ -831,6 +1121,25 @@ impl NativeCpu {
 
                     // Update flags as if we did SUB, but do not store result anywhere.
                     self.update_flags_sub(a, b, result);
+
+                    self.stats.cycles += 1; // or however many cycles CMP should cost
+                }
+                Some(Bytecode::FCmpValue) => {
+                    let reg = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let imm = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let a = f32::from_bits(self.registers[reg as usize]);
+                    let b = f32::from_bits(imm);
+
+                    if self.verbose {
+                        println!("FCMP R{}({}), {} => (flags updated for {} - {})", reg, a, b, a, b);
+                    }
+
+                    // Update flags as if we did SUB, but do not store result anywhere.
+                    self.update_flags_float(a, b);
 
                     self.stats.cycles += 1; // or however many cycles CMP should cost
                 }
@@ -918,8 +1227,8 @@ mod tests {
     use super::*; // Use your CPU and Bytecode types from the parent module
 
     // Helper function to run a small program and return the CPU state afterwards
-    fn run_program(program: &[u32], memory_size: u32, registers: u8) -> NativeCpu {
-        let mut cpu = NativeCpu::new(memory_size, registers);
+    fn run_program(program: &[u32], memory_size: u32, registers: u8) -> NativeCpu<NullHostIO> {
+        let mut cpu = NativeCpu::new(memory_size, registers, NullHostIO);
         cpu.load_memory(0, program);
         cpu.execute(RunMode::Run).unwrap();
         cpu
@@ -1107,5 +1416,200 @@ mod tests {
         let regs = cpu.get_registers();
         assert_eq!(regs[1], 123);
         assert_eq!(cpu.get_memory()[50], 123);
+    }
+
+    // A simple HostIO that records syscall invocations
+    #[derive(Debug)]
+    struct TestHostIO {
+        pub calls: Vec<(u32, u32, u32)>, // store code and some arguments read from registers
+    }
+
+    impl HostIO for TestHostIO {
+        fn syscall(
+            &mut self,
+            code: u32,
+            cpu: &mut NativeCpu<Self>,
+        ) -> Result<usize, ExecutionError> {
+            // For testing, let's say we take R1 and R2 as arguments
+            let arg1 = cpu.registers.get(1).copied().unwrap_or(0);
+            let arg2 = cpu.registers.get(2).copied().unwrap_or(0);
+            self.calls.push((code, arg1, arg2));
+            Ok(0)
+        }
+    }
+
+    fn run_program_with_host<IO: HostIO>(
+        program: &[u32],
+        memory_size: u32,
+        registers: u8,
+        host_io: IO,
+    ) -> NativeCpu<IO> {
+        let mut cpu = NativeCpu::new(memory_size, registers, host_io);
+        cpu.load_memory(0, program);
+        cpu.execute(RunMode::Run).unwrap();
+        cpu
+    }
+
+    #[test]
+    fn test_syscall() {
+        // Program:
+        // R0 = syscall code (1)
+        // R1 = 123, R2=456 arguments
+        // Syscall
+        // Halt
+        let program = &[
+            Bytecode::LoadValue as u32,
+            0,
+            1, // R0=1 (syscall code)
+            Bytecode::LoadValue as u32,
+            1,
+            123, // R1=123
+            Bytecode::LoadValue as u32,
+            2,
+            456, // R2=456
+            Bytecode::Syscall as u32,
+            Bytecode::Halt as u32,
+        ];
+
+        let cpu = run_program_with_host(program, 128, 8, TestHostIO { calls: vec![] });
+
+        assert_eq!(cpu.host_io.as_ref().unwrap().calls.len(), 1);
+        assert_eq!(cpu.host_io.as_ref().unwrap().calls[0], (1, 123, 456));
+    }
+
+    #[test]
+    fn test_load_store_byte() {
+        // Test storing a byte and loading it back.
+        // Steps:
+        // LoadValue R0, 42
+        // StoreByte 10, R0   (store 42 at address 10)
+        // LoadByte R1, 10    (load from address 10 into R1)
+        // Halt
+        let program = &[
+            Bytecode::LoadValue as u32,
+            0,
+            42, // R0=42
+            Bytecode::StoreByte as u32,
+            10,
+            0, // memory[10*4]=42
+            Bytecode::LoadByte as u32,
+            1,
+            10, // R1 = memory[10*4]
+            Bytecode::Halt as u32,
+        ];
+
+        let cpu = run_program(program, 1024, 8);
+
+        assert_eq!(cpu.get_registers()[1], 42);
+    }
+
+    #[test]
+    fn test_fload() {
+        // Load a float immediate into R0
+        // Use a known float: 1.5f32.to_bits()
+        let f_val = 1.5f32.to_bits();
+        let program = &[Bytecode::LoadValue as u32, 0, f_val, Bytecode::Halt as u32];
+
+        let cpu = run_program(program, 128, 8);
+        let result_bits = cpu.get_registers()[0];
+        let result_float = f32::from_bits(result_bits);
+
+        assert!((result_float - 1.5).abs() < 1e-7);
+    }
+
+    #[test]
+    fn test_fadd() {
+        // Test adding two floats: R0=1.5, R1=2.5, FAdd R0,R1 => R0=4.0
+        let f1 = 1.5f32.to_bits();
+        let f2 = 2.5f32.to_bits();
+        let program = &[
+            Bytecode::LoadValue as u32,
+            0,
+            f1, // R0=1.5
+            Bytecode::LoadValue as u32,
+            1,
+            f2, // R1=2.5
+            Bytecode::FAdd as u32,
+            0,
+            1, // R0=R0+R1 =4.0
+            Bytecode::Halt as u32,
+        ];
+
+        let cpu = run_program(program, 128, 8);
+        let result_float = f32::from_bits(cpu.get_registers()[0]);
+
+        assert!((result_float - 4.0).abs() < 1e-7);
+    }
+
+    #[test]
+    fn test_fsub() {
+        // R0=5.0, R1=3.0, FSub R0,R1 => R0=2.0
+        let f5 = 5.0f32.to_bits();
+        let f3 = 3.0f32.to_bits();
+        let program = &[
+            Bytecode::LoadValue as u32,
+            0,
+            f5,
+            Bytecode::LoadValue as u32,
+            1,
+            f3,
+            Bytecode::FSub as u32,
+            0,
+            1,
+            Bytecode::Halt as u32,
+        ];
+
+        let cpu = run_program(program, 128, 8);
+        let result = f32::from_bits(cpu.get_registers()[0]);
+
+        assert!((result - 2.0).abs() < 1e-7);
+    }
+
+    #[test]
+    fn test_fmul() {
+        // R0=2.0, R1=3.5 => R0=7.0
+        let f2 = 2.0f32.to_bits();
+        let f3_5 = 3.5f32.to_bits();
+        let program = &[
+            Bytecode::LoadValue as u32,
+            0,
+            f2,
+            Bytecode::LoadValue as u32,
+            1,
+            f3_5,
+            Bytecode::FMul as u32,
+            0,
+            1,
+            Bytecode::Halt as u32,
+        ];
+
+        let cpu = run_program(program, 128, 8);
+        let result = f32::from_bits(cpu.get_registers()[0]);
+
+        assert!((result - 7.0).abs() < 1e-7);
+    }
+
+    #[test]
+    fn test_fdiv() {
+        // R0=10.0, R1=2.0 => R0=5.0
+        let f10 = 10.0f32.to_bits();
+        let f2 = 2.0f32.to_bits();
+        let program = &[
+            Bytecode::LoadValue as u32,
+            0,
+            f10,
+            Bytecode::LoadValue as u32,
+            1,
+            f2,
+            Bytecode::FDiv as u32,
+            0,
+            1,
+            Bytecode::Halt as u32,
+        ];
+
+        let cpu = run_program(program, 128, 8);
+        let result = f32::from_bits(cpu.get_registers()[0]);
+
+        assert!((result - 5.0).abs() < 1e-7);
     }
 }

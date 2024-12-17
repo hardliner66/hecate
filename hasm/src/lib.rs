@@ -1,6 +1,6 @@
 use common::Bytecode;
 use num_traits::ToPrimitive;
-use std::collections::HashMap; // Ensure you import the Bytecode enum from your code
+use std::collections::HashMap;
 use thiserror::Error;
 
 /// Error types that may occur during assembling.
@@ -24,16 +24,13 @@ pub enum AssembleError {
     ExpectedImmediate(String),
 }
 
-/// A struct to hold a parsed instruction line (after first pass).
 struct ParsedLine {
     label: Option<String>,
     tokens: Vec<String>,
 }
 
-/// Parse registers like "R0" -> 0.
 fn parse_register(s: &str) -> Result<u32, AssembleError> {
     if !(s.starts_with('R') || s.starts_with('r')) {
-        println!("{s}");
         return Err(AssembleError::InvalidRegister(s.to_string()));
     }
     let reg_part = &s[1..];
@@ -42,7 +39,6 @@ fn parse_register(s: &str) -> Result<u32, AssembleError> {
         .map_err(|_| AssembleError::InvalidRegister(s.to_string()))
 }
 
-/// Parse an immediate (non-address) value.
 fn parse_imm(s: &str) -> Result<u32, AssembleError> {
     if s.starts_with('@') {
         return Err(AssembleError::ExpectedImmediate(s.to_string()));
@@ -51,8 +47,6 @@ fn parse_imm(s: &str) -> Result<u32, AssembleError> {
         .map_err(|_| AssembleError::InvalidImmediate(s.to_string()))
 }
 
-/// Parse an address operand. This may be `@<number>` or `@<label>`.
-/// We'll return a special enum to indicate what was found.
 enum AddressOperand {
     Label(String),
     Immediate(u32),
@@ -64,17 +58,13 @@ fn parse_address_operand(s: &str) -> Result<AddressOperand, AssembleError> {
     }
 
     let addr_str = &s[1..];
-    // Try to parse as a number first
     if let Ok(num) = addr_str.parse::<u32>() {
         return Ok(AddressOperand::Immediate(num));
     }
 
-    // If not a number, treat it as a label
     Ok(AddressOperand::Label(addr_str.to_string()))
 }
 
-/// Tokenize a single line of assembly, separating by whitespace and commas.
-/// Remove comments starting with ';'.
 fn tokenize_line(line: &str) -> Vec<String> {
     let line = line.split(';').next().unwrap_or(line);
     line.split(|c: char| c.is_whitespace() || c == ',')
@@ -84,17 +74,12 @@ fn tokenize_line(line: &str) -> Vec<String> {
         .collect()
 }
 
-/// First pass:
-/// - Parse lines
-/// - Identify labels and record their line index.
-/// - Store lines for second pass.
 fn first_pass(program: &str) -> (Vec<ParsedLine>, HashMap<String, u32>) {
     let mut parsed_lines = Vec::new();
 
     for line in program.lines() {
         let tokens = tokenize_line(line);
         if tokens.is_empty() {
-            // Empty or comment line
             parsed_lines.push(ParsedLine {
                 label: None,
                 tokens: vec![],
@@ -102,7 +87,6 @@ fn first_pass(program: &str) -> (Vec<ParsedLine>, HashMap<String, u32>) {
             continue;
         }
 
-        // Check if the first token ends with ':', indicating a label
         let mut label: Option<String> = None;
         let mut instr_tokens = tokens.clone();
 
@@ -110,7 +94,7 @@ fn first_pass(program: &str) -> (Vec<ParsedLine>, HashMap<String, u32>) {
             if first.ends_with(':') {
                 let lbl = first.trim_end_matches(':').to_string();
                 label = Some(lbl);
-                instr_tokens.remove(0); // Remove label from instruction tokens
+                instr_tokens.remove(0);
             }
         }
 
@@ -120,38 +104,40 @@ fn first_pass(program: &str) -> (Vec<ParsedLine>, HashMap<String, u32>) {
         });
     }
 
-    // Now we know how many lines we have, but we don't know addresses yet.
-    // We must do a dry run to figure out addresses of each line.
-    // Actually, addresses correspond to memory words, not just lines.
-    // We'll assign addresses after we generate code since each instruction can produce multiple words.
-    // Instead, we will do this:
-    // - Each line can produce multiple words.
-    // - We only know how many words an instruction will produce after we parse it.
-    // Actually, each instruction in this design produces a known number of words:
-    //   - 1 word for opcode
-    //   - plus however many arguments it has (e.g. LoadValue = opcode + reg + imm = 3 words total)
-    // We can do a preliminary pass through `parsed_lines` and predict how many words each line will generate.
-
-    // Let's write a helper function to predict how many words a line of tokens will produce.
     fn instruction_size(tokens: &[String]) -> usize {
         if tokens.is_empty() {
-            // Empty line or just label line: no output
             return 0;
         }
         let mnemonic = tokens[0].to_lowercase();
         match mnemonic.as_str() {
-            // Single word instructions
-            "nop" | "halt" | "ret" => 1,
-            "load" => 3,                                // load R<reg> <imm|@addr>
-            "store" => 3,                               // store @addr, R<reg>
-            "pushvalue" => 2,                           // pushvalue <imm>
-            "pushreg" => 2,                             // pushreg R<reg>
-            "pop" => 2,                                 // pop R<reg>
-            "add" | "sub" | "mul" | "div" | "cmp" => 3, // <op> R<r1>, R<r2>
+            "nop" | "halt" | "ret" | "syscall" => 1,
+            "retreg" => 2, // retreg R<reg>
+
+            // load variants
+            "load" => 3,
+            "store" => 3,
+
+            "pushvalue" => 2,
+            "pushreg" => 2,
+            "pop" => 2,
+
+            // arithmetic and cmp
+            "add" | "sub" | "mul" | "div" | "cmp" => 3,
+            "addvalue" | "subvalue" | "mulvalue" | "divvalue" | "cmpvalue" => 3,
+
+            // jumps and call
             "jmp" | "je" | "jne" | "jg" | "jge" | "jl" | "jle" | "ja" | "jae" | "jb" | "jbe"
             | "jc" | "jnc" | "jo" | "jno" | "js" | "jns" | "jxcz" | "call" | "inspect" => 2,
-            "retreg" => 2, // retreg R<reg>
-            _ => 0,        // Unknown will be handled later
+
+            // floating point
+            "fload" => 3,
+            "fadd" | "fsub" | "fmul" | "fdiv" | "fcmp" => 3,
+
+            // byte load/store
+            "loadbyte" => 3,
+            "storebyte" => 3,
+
+            _ => 0, // We'll handle unknown later
         }
     }
 
@@ -159,23 +145,30 @@ fn first_pass(program: &str) -> (Vec<ParsedLine>, HashMap<String, u32>) {
     let mut label_map = HashMap::new();
     for pline in parsed_lines.iter() {
         if let Some(ref lbl) = pline.label {
-            // Record the label's address (in memory words)
             label_map.insert(lbl.clone(), current_address as u32);
         }
-        // Add the size of this line's instruction to current_address
         current_address += instruction_size(&pline.tokens);
     }
 
     (parsed_lines, label_map)
 }
 
-/// Second pass:
-/// - Now that we have `label_map`, we can resolve label addresses.
-/// - Convert each line's tokens into actual code.
 pub fn assemble_program(program: &str) -> Result<Vec<u32>, AssembleError> {
     let (parsed_lines, label_map) = first_pass(program);
 
     let mut code = Vec::new();
+
+    let reg_arg = |t: &str| parse_register(t);
+    let imm_arg = |t: &str| parse_imm(t);
+    let addr_arg = |t: &str| -> Result<u32, AssembleError> {
+        match parse_address_operand(t)? {
+            AddressOperand::Immediate(val) => Ok(val),
+            AddressOperand::Label(lbl) => label_map
+                .get(&lbl)
+                .cloned()
+                .ok_or(AssembleError::UnknownLabel(lbl)),
+        }
+    };
 
     for pline in parsed_lines {
         let tokens = pline.tokens;
@@ -185,28 +178,28 @@ pub fn assemble_program(program: &str) -> Result<Vec<u32>, AssembleError> {
 
         let mnemonic = tokens[0].to_lowercase();
 
-        // Helper closures to handle arguments
-        let reg_arg = |t: &str| parse_register(t);
-        let imm_arg = |t: &str| parse_imm(t);
-        let addr_arg = |t: &str| -> Result<u32, AssembleError> {
-            match parse_address_operand(t)? {
-                AddressOperand::Immediate(val) => Ok(val),
-                AddressOperand::Label(lbl) => label_map
-                    .get(&lbl)
-                    .cloned()
-                    .ok_or(AssembleError::UnknownLabel(lbl)),
-            }
+        let emit = |op: Bytecode, args: &[u32], code: &mut Vec<u32>| {
+            code.push(op.to_u32().unwrap());
+            code.extend_from_slice(args);
         };
 
         match mnemonic.as_str() {
             "nop" => {
-                code.push(Bytecode::Nop.to_u32().unwrap());
+                emit(Bytecode::Nop, &[], &mut code);
             }
             "halt" => {
-                code.push(Bytecode::Halt.to_u32().unwrap());
+                emit(Bytecode::Halt, &[], &mut code);
             }
+            "ret" => {
+                emit(Bytecode::Ret, &[], &mut code);
+            }
+            "syscall" => {
+                // no arguments, syscall code should be in R0
+                emit(Bytecode::Syscall, &[], &mut code);
+            }
+
+            // load/store variants
             "load" => {
-                // load R<reg>, <imm|@addr>
                 if tokens.len() < 3 {
                     return Err(AssembleError::MissingArgument(format!("{:?}", tokens)));
                 }
@@ -214,48 +207,53 @@ pub fn assemble_program(program: &str) -> Result<Vec<u32>, AssembleError> {
                 let second = &tokens[2];
                 if second.starts_with('@') {
                     // LoadMemory
-                    let a = addr_arg(second.trim())?;
-                    code.push(Bytecode::LoadMemory.to_u32().unwrap());
-                    code.push(r);
-                    code.push(a);
+                    let a = addr_arg(second)?;
+                    emit(Bytecode::LoadMemory, &[r, a], &mut code);
                 } else if second.starts_with('R') {
-                    // LoadMemory
-                    let a = reg_arg(second.trim())?;
-                    code.push(Bytecode::LoadReg.to_u32().unwrap());
-                    code.push(r);
-                    code.push(a);
+                    // LoadReg
+                    let a = reg_arg(second)?;
+                    emit(Bytecode::LoadReg, &[r, a], &mut code);
                 } else {
                     // LoadValue
-                    let i = imm_arg(second.trim())?;
-                    code.push(Bytecode::LoadValue.to_u32().unwrap());
-                    code.push(r);
-                    code.push(i);
+                    let i = imm_arg(second)?;
+                    emit(Bytecode::LoadValue, &[r, i], &mut code);
                 }
             }
             "store" => {
-                // store @addr, R<reg>
                 if tokens.len() < 3 {
                     return Err(AssembleError::MissingArgument(format!("{:?}", tokens)));
                 }
                 let a = addr_arg(&tokens[1])?;
                 let r = reg_arg(&tokens[2])?;
-                code.push(Bytecode::Store.to_u32().unwrap());
-                code.push(a);
-                code.push(r);
+                emit(Bytecode::Store, &[a, r], &mut code);
+            }
+
+            "pushvalue" => {
+                if tokens.len() < 2 {
+                    return Err(AssembleError::MissingArgument(format!("{:?}", tokens)));
+                }
+                let i = imm_arg(&tokens[1])?;
+                emit(Bytecode::PushValue, &[i], &mut code);
+            }
+            "pushreg" => {
+                if tokens.len() < 2 {
+                    return Err(AssembleError::MissingArgument(format!("{:?}", tokens)));
+                }
+                let r = reg_arg(&tokens[1])?;
+                emit(Bytecode::PushReg, &[r], &mut code);
             }
             "push" => {
-                // Syntax: push <imm>
+                // to remain compatible with previous logic, if you want "push" to handle both imm and reg
+                // just parse and decide:
                 if tokens.len() < 2 {
                     return Err(AssembleError::MissingArgument(format!("{:?}", tokens)));
                 }
                 if tokens[1].starts_with('R') {
-                    let reg = parse_register(&tokens[1])?;
-                    code.push(Bytecode::PushReg.to_u32().unwrap());
-                    code.push(reg);
+                    let r = reg_arg(&tokens[1])?;
+                    emit(Bytecode::PushReg, &[r], &mut code);
                 } else {
-                    let imm = parse_imm(&tokens[1])?;
-                    code.push(Bytecode::PushValue.to_u32().unwrap());
-                    code.push(imm);
+                    let i = imm_arg(&tokens[1])?;
+                    emit(Bytecode::PushValue, &[i], &mut code);
                 }
             }
             "pop" => {
@@ -263,14 +261,14 @@ pub fn assemble_program(program: &str) -> Result<Vec<u32>, AssembleError> {
                     return Err(AssembleError::MissingArgument(format!("{:?}", tokens)));
                 }
                 let r = reg_arg(&tokens[1])?;
-                code.push(Bytecode::Pop.to_u32().unwrap());
-                code.push(r);
+                emit(Bytecode::Pop, &[r], &mut code);
             }
+
             "add" | "sub" | "mul" | "div" | "cmp" => {
                 if tokens.len() < 3 {
                     return Err(AssembleError::MissingArgument(format!("{:?}", tokens)));
                 }
-                let use_register = tokens[2].starts_with("R");
+                let use_register = tokens[2].starts_with('R');
                 let r1 = reg_arg(&tokens[1])?;
                 let r2 = if use_register {
                     reg_arg(&tokens[2])?
@@ -278,47 +276,16 @@ pub fn assemble_program(program: &str) -> Result<Vec<u32>, AssembleError> {
                     imm_arg(&tokens[2])?
                 };
                 let op = match mnemonic.as_str() {
-                    "add" => {
-                        if use_register {
-                            Bytecode::Add
-                        } else {
-                            Bytecode::AddValue
-                        }
-                    }
-                    "sub" => {
-                        if use_register {
-                            Bytecode::Sub
-                        } else {
-                            Bytecode::SubValue
-                        }
-                    }
-                    "mul" => {
-                        if use_register {
-                            Bytecode::Mul
-                        } else {
-                            Bytecode::MulValue
-                        }
-                    }
-                    "div" => {
-                        if use_register {
-                            Bytecode::Div
-                        } else {
-                            Bytecode::DivValue
-                        }
-                    }
-                    "cmp" => {
-                        if use_register {
-                            Bytecode::Cmp
-                        } else {
-                            Bytecode::CmpValue
-                        }
-                    }
+                    "add" => if use_register { Bytecode::Add } else { Bytecode::AddValue },
+                    "sub" => if use_register { Bytecode::Sub } else { Bytecode::SubValue },
+                    "mul" => if use_register { Bytecode::Mul } else { Bytecode::MulValue },
+                    "div" => if use_register { Bytecode::Div } else { Bytecode::DivValue },
+                    "cmp" => if use_register { Bytecode::Cmp } else { Bytecode::CmpValue },
                     _ => unreachable!(),
                 };
-                code.push(op.to_u32().unwrap());
-                code.push(r1);
-                code.push(r2);
+                emit(op, &[r1, r2], &mut code);
             }
+
             "jmp" | "je" | "jne" | "jg" | "jge" | "jl" | "jle" | "ja" | "jae" | "jb" | "jbe"
             | "jc" | "jnc" | "jo" | "jno" | "js" | "jns" | "jxcz" | "call" | "inspect" => {
                 if tokens.len() < 2 {
@@ -348,12 +315,56 @@ pub fn assemble_program(program: &str) -> Result<Vec<u32>, AssembleError> {
                     "inspect" => Bytecode::Inspect,
                     _ => unreachable!(),
                 };
-                code.push(op.to_u32().unwrap());
-                code.push(a);
+                emit(op, &[a], &mut code);
             }
-            "ret" => {
-                code.push(Bytecode::Ret.to_u32().unwrap());
+
+            // Byte ops
+            "loadbyte" => {
+                if tokens.len() < 3 {
+                    return Err(AssembleError::MissingArgument(format!("{:?}", tokens)));
+                }
+                let r = reg_arg(&tokens[1])?;
+                let a = addr_arg(&tokens[2])?;
+                emit(Bytecode::LoadByte, &[r, a], &mut code);
             }
+            "storebyte" => {
+                if tokens.len() < 3 {
+                    return Err(AssembleError::MissingArgument(format!("{:?}", tokens)));
+                }
+                let a = addr_arg(&tokens[1])?;
+                let r = reg_arg(&tokens[2])?;
+                emit(Bytecode::StoreByte, &[a, r], &mut code);
+            }
+
+            // Floating point
+            "fload" => {
+                // fload R<reg>, <immBits>
+                // immBits is a u32 representing f32 bits
+                if tokens.len() < 3 {
+                    return Err(AssembleError::MissingArgument(format!("{:?}", tokens)));
+                }
+                let r = reg_arg(&tokens[1])?;
+                let imm = f32::from_bits(imm_arg(&tokens[2])?);
+                emit(Bytecode::LoadValue, &[r, imm.to_bits()], &mut code);
+            }
+
+            "fadd" | "fsub" | "fmul" | "fdiv" | "fcmp" => {
+                if tokens.len() < 3 {
+                    return Err(AssembleError::MissingArgument(format!("{:?}", tokens)));
+                }
+                let r1 = reg_arg(&tokens[1])?;
+                let r2 = reg_arg(&tokens[2])?;
+                let op = match mnemonic.as_str() {
+                    "fadd" => Bytecode::FAdd,
+                    "fsub" => Bytecode::FSub,
+                    "fmul" => Bytecode::FMul,
+                    "fdiv" => Bytecode::FDiv,
+                    "fcmp" => Bytecode::FCmp,
+                    _ => unreachable!(),
+                };
+                emit(op, &[r1, r2], &mut code);
+            }
+
             _ => {
                 return Err(AssembleError::UnknownMnemonic(mnemonic));
             }
