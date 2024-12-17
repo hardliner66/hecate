@@ -2,5 +2,23 @@
 	"editor.formatOnType": true,
 	"[commonlisp]": {
 		"editor.wordSeparators": "`|;:'\",()"
-	}
+	},
+	"cSpell.words": [
+		"byteorder",
+		"FADD",
+		"FCMP",
+		"FDIV",
+		"fload",
+		"FMUL",
+		"FSUB",
+		"hasm",
+		"Jxcz",
+		"loadbyte",
+		"pline",
+		"repr",
+		"storebyte",
+		"syscall",
+		"thiserror"
+	],
+	"sarif-viewer.connectToGithubCodeScanning": "off"
 }

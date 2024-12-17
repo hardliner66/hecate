@@ -16,19 +16,10 @@ const L2_WAYS: usize = 8;
 const L3_SETS: usize = 1024;
 const L3_WAYS: usize = 16;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
 struct CacheLine {
     valid: bool,
     tag: u32,
-}
-
-impl Default for CacheLine {
-    fn default() -> Self {
-        Self {
-            valid: false,
-            tag: 0,
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -1431,10 +1422,10 @@ mod tests {
         ];
 
         let cpu = run_program(program, 128, 4);
-        let regs = cpu.get_registers();
-        assert_eq!(regs[0], 42);
-        assert_eq!(regs[1], 20);
-        assert_eq!(regs[2], 10);
+        let registers = cpu.get_registers();
+        assert_eq!(registers[0], 42);
+        assert_eq!(registers[1], 20);
+        assert_eq!(registers[2], 10);
     }
 
     #[test]
@@ -1453,8 +1444,8 @@ mod tests {
         ];
 
         let cpu = run_program(program, 128, 4);
-        let regs = cpu.get_registers();
-        assert_eq!(regs[1], 123);
+        let registers = cpu.get_registers();
+        assert_eq!(registers[1], 123);
         assert_eq!(cpu.get_memory()[50], 123);
     }
 
@@ -1544,7 +1535,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fload() {
+    fn test_load_float() {
         // Load a float immediate into R0
         // Use a known float: 1.5f32.to_bits()
         let f_val = 1.5f32.to_bits();
