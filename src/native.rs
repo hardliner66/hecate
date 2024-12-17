@@ -91,7 +91,8 @@ impl Cache {
 
 #[derive(Debug, PartialEq, Eq)]
 enum MemoryAccessDirection {
-    Load,
+    LoadData,
+    LoadInstruction,
     Prefetch,
     Store,
 }
@@ -133,7 +134,8 @@ pub struct NativeCpu<IO: HostIO> {
     verbose: bool,
     stats: CpuStats,
     flags: Flags,
-    l1: Cache,
+    l1i: Cache,
+    l1d: Cache,
     l2: Cache,
     l3: Cache,
 
@@ -182,7 +184,8 @@ impl<IO: HostIO> NativeCpu<IO> {
             verbose: false,
             stats: CpuStats::default(),
             flags: Flags::default(),
-            l1: Cache::new(L1_SETS, L1_WAYS, LINE_SIZE, L1_LATENCY),
+            l1i: Cache::new(L1_SETS, L1_WAYS, LINE_SIZE, L1_LATENCY),
+            l1d: Cache::new(L1_SETS, L1_WAYS, LINE_SIZE, L1_LATENCY),
             l2: Cache::new(L2_SETS, L2_WAYS, LINE_SIZE, L2_LATENCY),
             l3: Cache::new(L3_SETS, L3_WAYS, LINE_SIZE, L3_LATENCY),
 
@@ -194,17 +197,24 @@ impl<IO: HostIO> NativeCpu<IO> {
 
     fn access(&mut self, address: u32, direction: MemoryAccessDirection) -> usize {
         self.stats.memory_access_count += 1;
-        let tag_l1 = self.l1.line_tag(address);
+        let l1_cache = if direction == MemoryAccessDirection::LoadInstruction {
+            &mut self.l1i
+        } else {
+            &mut self.l1d
+        };
+        let tag_l1 = l1_cache.line_tag(address);
 
         // Check L1
-        if let Some(l1_lat) = self.l1.access(address, tag_l1) {
+        if let Some(l1_lat) = l1_cache.access(address, tag_l1) {
             if self.verbose && direction != MemoryAccessDirection::Prefetch {
                 println!(" (L1 HIT)");
             }
             self.stats.cache_hits.l1 += 1;
             // L1 hit
             return match direction {
-                MemoryAccessDirection::Load | MemoryAccessDirection::Prefetch => l1_lat,
+                MemoryAccessDirection::LoadData
+                | MemoryAccessDirection::LoadInstruction
+                | MemoryAccessDirection::Prefetch => l1_lat,
                 MemoryAccessDirection::Store => AVERAGE_STORE_LATENCY,
             };
         }
@@ -218,10 +228,12 @@ impl<IO: HostIO> NativeCpu<IO> {
             }
             self.stats.cache_hits.l2 += 1;
             // L2 hit: bring line to L1
-            self.l1.insert_line(address, tag_l1);
+            l1_cache.insert_line(address, tag_l1);
 
             return match direction {
-                MemoryAccessDirection::Load | MemoryAccessDirection::Prefetch => l2_lat,
+                MemoryAccessDirection::LoadData
+                | MemoryAccessDirection::LoadInstruction
+                | MemoryAccessDirection::Prefetch => l2_lat,
                 MemoryAccessDirection::Store => AVERAGE_STORE_LATENCY,
             };
         }
@@ -236,10 +248,12 @@ impl<IO: HostIO> NativeCpu<IO> {
             self.stats.cache_hits.l3 += 1;
             // L3 hit: bring line into L2 and L1
             self.l2.insert_line(address, tag_l2);
-            self.l1.insert_line(address, tag_l1);
+            l1_cache.insert_line(address, tag_l1);
 
             return match direction {
-                MemoryAccessDirection::Load | MemoryAccessDirection::Prefetch => l3_lat,
+                MemoryAccessDirection::LoadData
+                | MemoryAccessDirection::LoadInstruction
+                | MemoryAccessDirection::Prefetch => l3_lat,
                 MemoryAccessDirection::Store => AVERAGE_STORE_LATENCY,
             };
         }
@@ -252,10 +266,12 @@ impl<IO: HostIO> NativeCpu<IO> {
         // Insert line into L3, L2, L1
         self.l3.insert_line(address, tag_l3);
         self.l2.insert_line(address, tag_l2);
-        self.l1.insert_line(address, tag_l1);
+        l1_cache.insert_line(address, tag_l1);
 
         match direction {
-            MemoryAccessDirection::Load | MemoryAccessDirection::Prefetch => MEMORY_LATENCY,
+            MemoryAccessDirection::LoadData
+            | MemoryAccessDirection::LoadInstruction
+            | MemoryAccessDirection::Prefetch => MEMORY_LATENCY,
             MemoryAccessDirection::Store => AVERAGE_STORE_LATENCY,
         }
     }
@@ -287,6 +303,19 @@ impl<IO: HostIO> NativeCpu<IO> {
             self.stable_stride = None;
         }
     }
+
+    fn prefetch_instructions(&mut self, current_address: u32) {
+        let words_per_line = (LINE_SIZE / 4) as i32;
+
+        for i in 0..10 {
+            let next_line_address = ((current_address as i32) + (words_per_line * i)) as u32;
+
+            // Prefetch both lines. Treat them as loads.
+            // We ignore the cost here, as this is normally done by the hardware in the background
+            _ = self.access(next_line_address, MemoryAccessDirection::Prefetch);
+        }
+    }
+
     fn prefetch_lines(&mut self, current_address: u32) {
         // If no stable stride, no prefetch
         let stride = match self.stable_stride {
@@ -339,12 +368,34 @@ impl<IO: HostIO> NativeCpu<IO> {
         self.detect_stride();
     }
 
+    fn read_instruction(&mut self, address: u32) -> Result<Bytecode, ExecutionError> {
+        self.valid_address(address)?;
+        if self.verbose {
+            print!("READ INSTR @{:#02x}", address);
+        }
+        let cost = self.access(address, MemoryAccessDirection::LoadInstruction);
+        self.stats.cycles += cost;
+
+        // Attempt prefetching if a pattern is found
+        self.prefetch_instructions(address);
+
+        let value = self.memory[address as usize];
+
+        match Bytecode::from_u32(value) {
+            Some(instr) => {
+                self.instruction_pointer += 1;
+                Ok(instr)
+            }
+            None => Err(ExecutionError::InvalidOpcode),
+        }
+    }
+
     fn read_memory(&mut self, address: u32) -> Result<u32, ExecutionError> {
         self.valid_address(address)?;
         if self.verbose {
             print!("READ @{:#02x}", address);
         }
-        let cost = self.access(address, MemoryAccessDirection::Load);
+        let cost = self.access(address, MemoryAccessDirection::LoadData);
         self.stats.cycles += cost;
 
         // Update load pattern history
@@ -486,7 +537,7 @@ impl<IO: HostIO> NativeCpu<IO> {
 
     fn read_byte(&mut self, address: u32) -> Result<u8, ExecutionError> {
         self.valid_address(address)?;
-        let cost = self.access(address, MemoryAccessDirection::Load);
+        let cost = self.access(address, MemoryAccessDirection::LoadData);
         self.stats.cycles += cost;
 
         // Careful: currently memory is Vec<u32>. To access a byte, you need a scheme:
@@ -544,11 +595,10 @@ impl<IO: HostIO> NativeCpu<IO> {
         while (cycles < 0 || executed < cycles)
             && (self.instruction_pointer as usize) < self.memory.len()
         {
-            let opcode = self.read_memory(self.instruction_pointer)?;
-            self.instruction_pointer += 1;
+            let opcode = self.read_instruction(self.instruction_pointer)?;
 
-            match Bytecode::from_u32(opcode) {
-                Some(Bytecode::Syscall) => {
+            match opcode {
+                Bytecode::Syscall => {
                     let code = self.registers[0]; // Syscall code in R0
                     if self.verbose {
                         println!("SYSCALL code={}", code);
@@ -558,7 +608,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     self.stats.cycles += host_io.syscall(code, self)?;
                     self.host_io.replace(host_io);
                 }
-                Some(Bytecode::LoadValue) => {
+                Bytecode::LoadValue => {
                     let reg = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
@@ -572,7 +622,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     self.registers[reg as usize] = imm;
                     self.stats.cycles += 1;
                 }
-                Some(Bytecode::LoadMemory) => {
+                Bytecode::LoadMemory => {
                     let reg = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
@@ -586,7 +636,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     self.registers[reg as usize] = self.read_memory(addr)?;
                     self.stats.cycles += 1;
                 }
-                Some(Bytecode::LoadReg) => {
+                Bytecode::LoadReg => {
                     let reg1 = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
@@ -600,7 +650,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     self.registers[reg1 as usize] = self.registers[reg2 as usize];
                     self.stats.cycles += 1;
                 }
-                Some(Bytecode::Store) => {
+                Bytecode::Store => {
                     let addr = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
@@ -613,7 +663,7 @@ impl<IO: HostIO> NativeCpu<IO> {
 
                     self.write_memory(addr, self.registers[reg as usize])?;
                 }
-                Some(Bytecode::LoadByte) => {
+                Bytecode::LoadByte => {
                     let reg = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
@@ -625,7 +675,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     self.stats.cycles += 1;
                 }
 
-                Some(Bytecode::StoreByte) => {
+                Bytecode::StoreByte => {
                     let addr = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
@@ -636,13 +686,13 @@ impl<IO: HostIO> NativeCpu<IO> {
                     self.write_byte(addr, value)?;
                     self.stats.cycles += 1;
                 }
-                Some(Bytecode::Inspect) => {
+                Bytecode::Inspect => {
                     let addr = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
                     println!("INSPECT @{:#02x} = {}", addr, self.read_memory(addr)?);
                 }
-                Some(Bytecode::Add) => {
+                Bytecode::Add => {
                     let reg1 = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
@@ -661,7 +711,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     self.update_flags_add(a, b, result);
                     self.stats.cycles += 1;
                 }
-                Some(Bytecode::AddValue) => {
+                Bytecode::AddValue => {
                     let reg = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
@@ -680,7 +730,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     self.update_flags_add(a, b, result);
                     self.stats.cycles += 1;
                 }
-                Some(Bytecode::FAdd) => {
+                Bytecode::FAdd => {
                     let reg1 = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
@@ -699,7 +749,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     self.update_flags_float(a, b);
                     self.stats.cycles += 2;
                 }
-                Some(Bytecode::FAddValue) => {
+                Bytecode::FAddValue => {
                     let reg = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
@@ -718,7 +768,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     self.update_flags_float(a, b);
                     self.stats.cycles += 2;
                 }
-                Some(Bytecode::Sub) => {
+                Bytecode::Sub => {
                     let reg1 = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
@@ -737,7 +787,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     self.update_flags_sub(a, b, result);
                     self.stats.cycles += 1;
                 }
-                Some(Bytecode::SubValue) => {
+                Bytecode::SubValue => {
                     let reg = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
@@ -756,7 +806,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     self.update_flags_sub(a, b, result);
                     self.stats.cycles += 1;
                 }
-                Some(Bytecode::FSub) => {
+                Bytecode::FSub => {
                     let reg1 = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
@@ -775,7 +825,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     self.update_flags_float(a, b);
                     self.stats.cycles += 2;
                 }
-                Some(Bytecode::FSubValue) => {
+                Bytecode::FSubValue => {
                     let reg = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
@@ -794,7 +844,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     self.update_flags_float(a, b);
                     self.stats.cycles += 2;
                 }
-                Some(Bytecode::Mul) => {
+                Bytecode::Mul => {
                     let reg1 = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
@@ -817,7 +867,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     // For cycle cost, just keep whatever logic you have; previously *4 was mentioned.
                     self.stats.cycles *= 4;
                 }
-                Some(Bytecode::MulValue) => {
+                Bytecode::MulValue => {
                     let reg = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
@@ -840,7 +890,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     // For cycle cost, just keep whatever logic you have; previously *4 was mentioned.
                     self.stats.cycles *= 4;
                 }
-                Some(Bytecode::FMul) => {
+                Bytecode::FMul => {
                     let reg1 = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
@@ -859,7 +909,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     self.update_flags_float(a, b);
                     self.stats.cycles += 4;
                 }
-                Some(Bytecode::FMulValue) => {
+                Bytecode::FMulValue => {
                     let reg = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
@@ -878,7 +928,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     self.update_flags_float(a, b);
                     self.stats.cycles += 4;
                 }
-                Some(Bytecode::Div) => {
+                Bytecode::Div => {
                     let reg1 = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
@@ -905,7 +955,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     // For cycle cost, previously *27 was mentioned.
                     self.stats.cycles *= 27;
                 }
-                Some(Bytecode::DivValue) => {
+                Bytecode::DivValue => {
                     let reg = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
@@ -932,7 +982,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     // For cycle cost, previously *27 was mentioned.
                     self.stats.cycles *= 27;
                 }
-                Some(Bytecode::FDiv) => {
+                Bytecode::FDiv => {
                     let reg1 = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
@@ -956,7 +1006,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     self.update_flags_float(a, b);
                     self.stats.cycles += 27;
                 }
-                Some(Bytecode::FDivValue) => {
+                Bytecode::FDivValue => {
                     let reg = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
@@ -980,7 +1030,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     self.update_flags_float(a, b);
                     self.stats.cycles += 27;
                 }
-                Some(Bytecode::Jmp) => {
+                Bytecode::Jmp => {
                     let imm = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer = imm;
 
@@ -990,7 +1040,7 @@ impl<IO: HostIO> NativeCpu<IO> {
 
                     self.stats.cycles += 1;
                 }
-                Some(Bytecode::PushValue) => {
+                Bytecode::PushValue => {
                     let imm = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
@@ -1000,7 +1050,7 @@ impl<IO: HostIO> NativeCpu<IO> {
 
                     self.push_stack(imm)?;
                 }
-                Some(Bytecode::PushReg) => {
+                Bytecode::PushReg => {
                     let reg = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
@@ -1012,7 +1062,7 @@ impl<IO: HostIO> NativeCpu<IO> {
 
                     self.push_stack(val)?;
                 }
-                Some(Bytecode::Pop) => {
+                Bytecode::Pop => {
                     let reg = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
@@ -1022,7 +1072,7 @@ impl<IO: HostIO> NativeCpu<IO> {
 
                     self.registers[reg as usize] = self.pop_stack()?;
                 }
-                Some(Bytecode::Call) => {
+                Bytecode::Call => {
                     let target = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
@@ -1038,7 +1088,7 @@ impl<IO: HostIO> NativeCpu<IO> {
 
                     self.stats.cycles += 25;
                 }
-                Some(Bytecode::Ret) => {
+                Bytecode::Ret => {
                     // Pop the return address from the stack
                     let return_address = self.pop_stack()?;
 
@@ -1049,13 +1099,13 @@ impl<IO: HostIO> NativeCpu<IO> {
                     self.instruction_pointer = return_address;
                     self.stats.cycles += 5;
                 }
-                Some(Bytecode::Halt) => {
+                Bytecode::Halt => {
                     if self.verbose {
                         println!("HALT");
                     }
                     break;
                 }
-                Some(Bytecode::Cmp) => {
+                Bytecode::Cmp => {
                     let reg1 = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
@@ -1077,7 +1127,7 @@ impl<IO: HostIO> NativeCpu<IO> {
 
                     self.stats.cycles += 1; // or however many cycles CMP should cost
                 }
-                Some(Bytecode::FCmp) => {
+                Bytecode::FCmp => {
                     let reg1 = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
@@ -1096,7 +1146,7 @@ impl<IO: HostIO> NativeCpu<IO> {
 
                     self.stats.cycles += 2; // or however many cycles CMP should cost
                 }
-                Some(Bytecode::CmpValue) => {
+                Bytecode::CmpValue => {
                     let reg = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
@@ -1118,7 +1168,7 @@ impl<IO: HostIO> NativeCpu<IO> {
 
                     self.stats.cycles += 1; // or however many cycles CMP should cost
                 }
-                Some(Bytecode::FCmpValue) => {
+                Bytecode::FCmpValue => {
                     let reg = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
@@ -1137,31 +1187,31 @@ impl<IO: HostIO> NativeCpu<IO> {
 
                     self.stats.cycles += 2; // or however many cycles CMP should cost
                 }
-                Some(Bytecode::Je) |
-                Some(Bytecode::Jne) |
-                Some(Bytecode::Jg) |
-                Some(Bytecode::Jge) |
-                Some(Bytecode::Jl) |
-                Some(Bytecode::Jle) |
-                Some(Bytecode::Ja) |
-                Some(Bytecode::Jae) |
-                Some(Bytecode::Jb) |
-                Some(Bytecode::Jbe) |
-                Some(Bytecode::Jc) |
-                Some(Bytecode::Jnc) |
-                Some(Bytecode::Jo) |
-                Some(Bytecode::Jno) |
-                Some(Bytecode::Js) |
-                Some(Bytecode::Jns) |
-                Some(Bytecode::Jp) | // if parity is implemented
-                Some(Bytecode::Jnp) | // if parity is implemented
-                Some(Bytecode::Jxcz) => {
+                Bytecode::Je |
+                Bytecode::Jne |
+                Bytecode::Jg |
+                Bytecode::Jge |
+                Bytecode::Jl |
+                Bytecode::Jle |
+                Bytecode::Ja |
+                Bytecode::Jae |
+                Bytecode::Jb |
+                Bytecode::Jbe |
+                Bytecode::Jc |
+                Bytecode::Jnc |
+                Bytecode::Jo |
+                Bytecode::Jno |
+                Bytecode::Js |
+                Bytecode::Jns |
+                Bytecode::Jp | // if parity is implemented
+                Bytecode::Jnp | // if parity is implemented
+                Bytecode::Jxcz => {
                     // All these jump instructions have the same pattern: they read an immediate address
                     let imm = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
                     // Check if we should jump
-                    if self.should_jump(Bytecode::from_u32(opcode).unwrap()) {
+                    if self.should_jump(opcode) {
                         if self.verbose {
                             println!("CONDITIONAL JUMP to {}", imm);
                         }
@@ -1172,15 +1222,11 @@ impl<IO: HostIO> NativeCpu<IO> {
 
                     self.stats.cycles += 2;
                 }
-                Some(Bytecode::Nop) => {
+                Bytecode::Nop => {
                     if self.verbose {
                         println!("NOP");
                     }
                     self.stats.cycles += 1;
-                }
-                None => {
-                    println!("Unknown opcode: {:X}", opcode);
-                    break;
                 }
             }
             executed += 1;

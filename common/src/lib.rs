@@ -14,6 +14,8 @@ pub enum ExecutionError {
     StackUnderflow,
     #[error("Division by zero")]
     DivisionByZero,
+    #[error("Invalid Opcode")]
+    InvalidOpcode,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
