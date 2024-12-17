@@ -1,24 +1,24 @@
 main:
-	;	Find factorial for the initial value of R2,
-	load R2, 5
+  ; Find factorial for the initial value of R2,
+  load R2, 5
 
-	;	Copy the initial value of R2 to R0,
-	;	R0 is our factorial result
-	load R0, R2
-    call @loop
-	; Display the message and exit
-	store @1000, R0
-    inspect @1000
-    halt
+  ; Copy the initial value of R2 to R0,
+  ; R0 is our factorial result
+  load R0, R2
+  call @loop
+  ; Display the message and exit
+  store @1000, R0
+  inspect @1000
+  halt
 
 loop:
-	;	If the counter is less or equal to 1, finish
-	cmp R2, 1
-	jle @end
+  ; If the counter is less or equal to 1, finish
+  cmp R2, 1
+  jle @end
 
-	sub R2, 1
-	mul R0, R2
-	jmp @loop
+  sub R2, 1
+  mul R0, R2
+  jmp @loop
 
 end:
-    ret
+  ret
