@@ -6,4 +6,5 @@ edition = "2021"
 [dependencies]
 num-derive = "0.4.2"
 num-traits = "0.2.19"
+strum = { version = "0.26.3", features = ["derive"] }
 thiserror = "2.0.6"

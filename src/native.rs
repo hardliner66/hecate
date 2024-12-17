@@ -1,12 +1,11 @@
 use common::{Bytecode, CpuStats, CpuTrait, ExecutionError, RunMode};
 use num_traits::FromPrimitive;
 
-// Constants for latencies:
 const L1_LATENCY: usize = 3;
 const L2_LATENCY: usize = 11;
 const L3_LATENCY: usize = 50;
 const MEMORY_LATENCY: usize = 125;
-const AVERAGE_STORE_LATENCY: usize = 1; // Minimal overhead once line is in L1
+const AVERAGE_STORE_LATENCY: usize = 1;
 
 const LINE_SIZE: u32 = 64;
 const L1_SETS: usize = 64;
@@ -111,7 +110,7 @@ impl HostIO for NullHostIO {
         _code: u32,
         _cpu: &mut NativeCpu<NullHostIO>,
     ) -> Result<usize, ExecutionError> {
-        // Default: do nothing or return an error
+        // Default: do nothing
         Ok(1250)
     }
 }
@@ -121,7 +120,7 @@ pub struct NativeCpu<IO: HostIO> {
     memory: Vec<u32>,
     registers: Vec<u32>,
     instruction_pointer: u32,
-    stack_pointer: u32, // Stack pointer
+    stack_pointer: u32,
     verbose: bool,
     stats: CpuStats,
     flags: Flags,
@@ -130,9 +129,8 @@ pub struct NativeCpu<IO: HostIO> {
     l2: Cache,
     l3: Cache,
 
-    // Prefetch-related fields
-    last_load_addresses: Vec<u32>, // keep track of recent load addresses
-    stable_stride: Option<i32>,    // detected stable stride if any
+    last_load_addresses: Vec<u32>,
+    stable_stride: Option<i32>,
     host_io: Option<IO>,
 }
 
@@ -171,7 +169,7 @@ impl<IO: HostIO> NativeCpu<IO> {
             memory: vec![0; memory_size as usize],
             registers: vec![0; registers as usize],
             instruction_pointer: 0,
-            stack_pointer: memory_size - 1, // Stack starts at the top of memory
+            stack_pointer: memory_size - 1,
             verbose: false,
             stats: CpuStats::default(),
             flags: Flags::default(),
@@ -200,7 +198,12 @@ impl<IO: HostIO> NativeCpu<IO> {
             if self.verbose && direction != MemoryAccessDirection::Prefetch {
                 println!(" (L1 HIT)");
             }
-            self.stats.cache_hits.l1 += 1;
+
+            if direction == MemoryAccessDirection::LoadInstruction {
+                self.stats.cache_hits.l1i += 1;
+            } else {
+                self.stats.cache_hits.l1d += 1;
+            }
             // L1 hit
             return match direction {
                 MemoryAccessDirection::LoadData
@@ -301,7 +304,6 @@ impl<IO: HostIO> NativeCpu<IO> {
         for i in 0..10 {
             let next_line_address = ((current_address as i32) + (words_per_line * i)) as u32;
 
-            // Prefetch both lines. Treat them as loads.
             // We ignore the cost here, as this is normally done by the hardware in the background
             _ = self.access(next_line_address, MemoryAccessDirection::Prefetch);
         }
@@ -318,28 +320,10 @@ impl<IO: HostIO> NativeCpu<IO> {
             return; // no stride to prefetch
         }
 
-        // How many lines to prefetch?
-        // For example, let's prefetch 2 lines ahead if stride is positive.
-        // We'll assume stride is in bytes. We'll compute next addresses by adding stride.
         // Ensure stride moves forward. If stride is negative, we could still prefetch backwards,
-        // but that doesn't make much sense. We'll just handle positive stride for simplicity.
+        // but we'll just handle positive stride for simplicity.
         if stride > 0 {
-            // Prefetch up to 2 lines ahead
-            // Convert stride from bytes to addresses.
-            // Actually, here stride is just difference in addresses (each address is 1 'unit'?),
-            // We'll assume memory addresses represent indexes, each 4 bytes per u32.
-            // If your addresses are byte addresses, stride is already in bytes.
-            // Our code uses addresses as indexes into memory (u32).
-            // Let's consider the stride we found is in terms of these 'word' addresses (since we do a4-a3).
-            // If we want line-based prefetching, we should align to LINE_SIZE/4 words per line
-            // (because each entry in memory is u32 and line_size=64 bytes = 16 words).
-
             let words_per_line = (LINE_SIZE / 4) as i32;
-            // We have a stride in words (since addresses are u32 indexes),
-            // Prefetching next 2 lines means:
-            // next_line_address = current_address + stride
-            // second_line_address = current_address + stride + words_per_line
-            // We'll try a heuristic: if stride > 0, prefetch the next line at current + stride and maybe one more line after that.
 
             let next_line_address = ((current_address as i32) + stride) as u32;
             let second_line_address = ((current_address as i32) + stride + words_per_line) as u32;
@@ -354,7 +338,7 @@ impl<IO: HostIO> NativeCpu<IO> {
     fn update_load_history(&mut self, address: u32) {
         self.last_load_addresses.push(address);
         if self.last_load_addresses.len() > 16 {
-            self.last_load_addresses.remove(0); // Keep a small history
+            self.last_load_addresses.remove(0);
         }
         self.detect_stride();
     }
@@ -367,7 +351,6 @@ impl<IO: HostIO> NativeCpu<IO> {
         let cost = self.access(address, MemoryAccessDirection::LoadInstruction);
         self.stats.cycles += cost;
 
-        // Attempt prefetching if a pattern is found
         self.prefetch_instructions(address);
 
         let value = self.memory[address as usize];
@@ -377,7 +360,10 @@ impl<IO: HostIO> NativeCpu<IO> {
                 self.instruction_pointer += 1;
                 Ok(instr)
             }
-            None => Err(ExecutionError::InvalidOpcode),
+            None => Err(ExecutionError::InvalidOpcode(
+                value,
+                self.instruction_pointer,
+            )),
         }
     }
 
@@ -389,10 +375,8 @@ impl<IO: HostIO> NativeCpu<IO> {
         let cost = self.access(address, MemoryAccessDirection::LoadData);
         self.stats.cycles += cost;
 
-        // Update load pattern history
         self.update_load_history(address);
 
-        // Attempt prefetching if a pattern is found
         self.prefetch_lines(address);
 
         Ok(self.memory[address as usize])
@@ -428,8 +412,6 @@ impl<IO: HostIO> NativeCpu<IO> {
     }
 
     fn update_flags_div(&mut self, _a: u32, _b: u32, result: u32) {
-        // For DIV:
-        // Typically, if DIV does not cause division by zero or overflow, CF and OF are cleared.
         self.flags.carry = false;
         self.flags.overflow = false;
 
@@ -442,10 +424,6 @@ impl<IO: HostIO> NativeCpu<IO> {
 
     fn should_jump(&self, instr: Bytecode) -> bool {
         let f = &self.flags;
-        // If you need to check CX register for Jxcz:
-        // Let's assume CX is register 1 (just an example, adapt as needed)
-        // let cx = self.registers[1]; // or whichever register is CX in your setup
-
         match instr {
             // Signed conditions
             Bytecode::Je => f.zero,
@@ -469,10 +447,6 @@ impl<IO: HostIO> NativeCpu<IO> {
             Bytecode::Js => f.sign,
             Bytecode::Jns => !f.sign,
 
-            // Parity-related (if implemented):
-            // Bytecode::Jp => f.parity,
-            // Bytecode::Jnp => !f.parity,
-
             // Special conditions
             Bytecode::Jxcz => {
                 let cx = self.registers.get(1).copied().unwrap_or(0);
@@ -493,9 +467,7 @@ impl<IO: HostIO> NativeCpu<IO> {
 
         // Carry flag: if unsigned addition overflows
         let (_, c) = a.overflowing_add(b);
-        self.flags.carry = c; // 'c' indicates if carry occurred
-                              // Alternatively, check using a u64 cast:
-                              // self.flags.carry = (a as u64 + b as u64) > 0xFFFF_FFFF;
+        self.flags.carry = c;
 
         // Overflow flag: check signed overflow
         // Signed overflow occurs if (a and b have same sign) and (result differs in sign)
@@ -505,7 +477,6 @@ impl<IO: HostIO> NativeCpu<IO> {
         self.flags.overflow = (a_sign == b_sign) && (a_sign != r_sign);
     }
 
-    // Call this after you perform a SUB instruction: result = a - b
     fn update_flags_sub(&mut self, a: u32, b: u32, result: u32) {
         // Zero flag
         self.flags.zero = result == 0;
@@ -522,7 +493,7 @@ impl<IO: HostIO> NativeCpu<IO> {
         let a_sign = (a as i32) < 0;
         let b_sign = (b as i32) < 0;
         let r_sign = (result as i32) < 0;
-        // Overflow occurs if (a_sign != b_sign) and (r_sign != a_sign)
+
         self.flags.overflow = (a_sign != b_sign) && (r_sign != a_sign);
     }
 
@@ -531,13 +502,9 @@ impl<IO: HostIO> NativeCpu<IO> {
         let cost = self.access(address, MemoryAccessDirection::LoadData);
         self.stats.cycles += cost;
 
-        // Careful: currently memory is Vec<u32>. To access a byte, you need a scheme:
-        // Option 1: Make memory a Vec<u8> instead. Then each address maps directly to a byte.
-        // Option 2: If keeping Vec<u32>, address*4 is the byte index. Let's assume each memory address = 1 word (u32).
-        // For byte granularity, we must multiply addresses by 4:
         let byte_index = (address as usize) * 4;
         if byte_index + 1 > self.memory.len() * 4 {
-            return Err(ExecutionError::InvalidMemoryLocation);
+            return Err(ExecutionError::InvalidMemoryLocation(address));
         }
 
         let mem_as_bytes = unsafe {
@@ -553,7 +520,7 @@ impl<IO: HostIO> NativeCpu<IO> {
 
         let byte_index = (address as usize) * 4;
         if byte_index + 1 > self.memory.len() * 4 {
-            return Err(ExecutionError::InvalidMemoryLocation);
+            return Err(ExecutionError::InvalidMemoryLocation(address));
         }
 
         let mem_as_bytes = unsafe {
@@ -589,15 +556,11 @@ impl<IO: HostIO> NativeCpu<IO> {
             let opcode = self.read_instruction(self.instruction_pointer)?;
 
             match opcode {
-                Bytecode::Syscall => {
-                    let code = self.registers[0]; // Syscall code in R0
+                Bytecode::Nop => {
                     if self.verbose {
-                        println!("SYSCALL code={}", code);
+                        println!("NOP");
                     }
-
-                    let mut host_io = self.host_io.take().unwrap();
-                    self.stats.cycles += host_io.syscall(code, self)?;
-                    self.host_io.replace(host_io);
+                    self.stats.cycles += 1;
                 }
                 Bytecode::LoadValue => {
                     let reg = self.read_memory(self.instruction_pointer)?;
@@ -653,35 +616,42 @@ impl<IO: HostIO> NativeCpu<IO> {
                     }
 
                     self.write_memory(addr, self.registers[reg as usize])?;
+                    self.stats.cycles += 1;
                 }
-                Bytecode::LoadByte => {
+                Bytecode::PushValue => {
+                    let imm = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    if self.verbose {
+                        println!("PUSH {}", imm);
+                    }
+
+                    self.push_stack(imm)?;
+                    self.stats.cycles += 1;
+                }
+                Bytecode::PushReg => {
                     let reg = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
-                    let addr = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
+                    if self.verbose {
+                        println!("PUSH R{}", reg);
+                    }
 
-                    let byte = self.read_byte(addr)?;
-                    self.registers[reg as usize] = byte as u32; // store in a register as u32
+                    let val = self.registers[reg as usize];
+
+                    self.push_stack(val)?;
                     self.stats.cycles += 1;
                 }
-
-                Bytecode::StoreByte => {
-                    let addr = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
-
+                Bytecode::Pop => {
                     let reg = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
-                    let value = (self.registers[reg as usize] & 0xFF) as u8; // low 8 bits
-                    self.write_byte(addr, value)?;
-                    self.stats.cycles += 1;
-                }
-                Bytecode::Inspect => {
-                    let addr = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
+                    if self.verbose {
+                        println!("POP R{}", reg);
+                    }
 
-                    println!("INSPECT @{:#02x} = {}", addr, self.read_memory(addr)?);
+                    self.registers[reg as usize] = self.pop_stack()?;
+                    self.stats.cycles += 1;
                 }
                 Bytecode::Add => {
                     let reg1 = self.read_memory(self.instruction_pointer)?;
@@ -855,8 +825,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     self.registers[reg1 as usize] = result;
                     self.update_flags_mul(a, b, wide_result);
 
-                    // For cycle cost, just keep whatever logic you have; previously *4 was mentioned.
-                    self.stats.cycles *= 4;
+                    self.stats.cycles += 4;
                 }
                 Bytecode::MulValue => {
                     let reg = self.read_memory(self.instruction_pointer)?;
@@ -878,8 +847,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     self.registers[reg as usize] = result;
                     self.update_flags_mul(a, b, wide_result);
 
-                    // For cycle cost, just keep whatever logic you have; previously *4 was mentioned.
-                    self.stats.cycles *= 4;
+                    self.stats.cycles += 4;
                 }
                 Bytecode::FMul => {
                     let reg1 = self.read_memory(self.instruction_pointer)?;
@@ -933,7 +901,6 @@ impl<IO: HostIO> NativeCpu<IO> {
                         return Err(ExecutionError::DivisionByZero);
                     }
 
-                    // Perform unsigned division
                     let result = a.wrapping_div(b);
 
                     if self.verbose {
@@ -943,8 +910,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     self.registers[reg1 as usize] = result;
                     self.update_flags_div(a, b, result);
 
-                    // For cycle cost, previously *27 was mentioned.
-                    self.stats.cycles *= 27;
+                    self.stats.cycles += 27;
                 }
                 Bytecode::DivValue => {
                     let reg = self.read_memory(self.instruction_pointer)?;
@@ -960,7 +926,6 @@ impl<IO: HostIO> NativeCpu<IO> {
                         return Err(ExecutionError::DivisionByZero);
                     }
 
-                    // Perform unsigned division
                     let result = a.wrapping_div(b);
 
                     if self.verbose {
@@ -970,8 +935,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     self.registers[reg as usize] = result;
                     self.update_flags_div(a, b, result);
 
-                    // For cycle cost, previously *27 was mentioned.
-                    self.stats.cycles *= 27;
+                    self.stats.cycles += 27;
                 }
                 Bytecode::FDiv => {
                     let reg1 = self.read_memory(self.instruction_pointer)?;
@@ -1021,80 +985,28 @@ impl<IO: HostIO> NativeCpu<IO> {
                     self.update_flags_float(a, b);
                     self.stats.cycles += 27;
                 }
-                Bytecode::Jmp => {
-                    let imm = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer = imm;
-
-                    if self.verbose {
-                        println!("JMP {}", imm);
-                    }
-
-                    self.stats.cycles += 1;
-                }
-                Bytecode::PushValue => {
-                    let imm = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
-
-                    if self.verbose {
-                        println!("PUSH {}", imm);
-                    }
-
-                    self.push_stack(imm)?;
-                }
-                Bytecode::PushReg => {
+                Bytecode::LoadByte => {
                     let reg = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
-                    if self.verbose {
-                        println!("PUSH R{}", reg);
-                    }
+                    let addr = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
 
-                    let val = self.registers[reg as usize];
-
-                    self.push_stack(val)?;
+                    let byte = self.read_byte(addr)?;
+                    self.registers[reg as usize] = byte as u32;
+                    self.stats.cycles += 2;
                 }
-                Bytecode::Pop => {
+
+                Bytecode::StoreByte => {
+                    let addr = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
                     let reg = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
-                    if self.verbose {
-                        println!("POP R{}", reg);
-                    }
-
-                    self.registers[reg as usize] = self.pop_stack()?;
-                }
-                Bytecode::Call => {
-                    let target = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
-
-                    if self.verbose {
-                        println!("CALL @{:#02x}", target);
-                    }
-
-                    // Push the current PC onto the stack as the return address
-                    self.push_stack(self.instruction_pointer)?;
-
-                    // Jump to the target address
-                    self.instruction_pointer = target;
-
-                    self.stats.cycles += 25;
-                }
-                Bytecode::Ret => {
-                    // Pop the return address from the stack
-                    let return_address = self.pop_stack()?;
-
-                    if self.verbose {
-                        println!("RET to @{:#02x}", return_address);
-                    }
-
-                    self.instruction_pointer = return_address;
-                    self.stats.cycles += 5;
-                }
-                Bytecode::Halt => {
-                    if self.verbose {
-                        println!("HALT");
-                    }
-                    break;
+                    let value = (self.registers[reg as usize] & 0xFF) as u8;
+                    self.write_byte(addr, value)?;
+                    self.stats.cycles += 2;
                 }
                 Bytecode::Cmp => {
                     let reg1 = self.read_memory(self.instruction_pointer)?;
@@ -1106,17 +1018,42 @@ impl<IO: HostIO> NativeCpu<IO> {
                     let a = self.registers[reg1 as usize];
                     let b = self.registers[reg2 as usize];
 
-                    // Perform a subtraction in a temporary variable just to get flags.
                     let result = a.wrapping_sub(b);
 
                     if self.verbose {
-                        println!("CMP R{}({}), R{}({}) => (flags updated for {} - {})", reg1, a, reg2, b, a, b);
+                        println!(
+                            "CMP R{}({}), R{}({}) => (flags updated for {} - {})",
+                            reg1, a, reg2, b, a, b
+                        );
                     }
 
-                    // Update flags as if we did SUB, but do not store result anywhere.
                     self.update_flags_sub(a, b, result);
 
-                    self.stats.cycles += 1; // or however many cycles CMP should cost
+                    self.stats.cycles += 1;
+                }
+
+                Bytecode::CmpValue => {
+                    let reg = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let imm = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let a = self.registers[reg as usize];
+                    let b = imm;
+
+                    let result = a.wrapping_sub(b);
+
+                    if self.verbose {
+                        println!(
+                            "CMP R{}({}), {} => (flags updated for {} - {})",
+                            reg, a, b, a, b
+                        );
+                    }
+
+                    self.update_flags_sub(a, b, result);
+
+                    self.stats.cycles += 1;
                 }
                 Bytecode::FCmp => {
                     let reg1 = self.read_memory(self.instruction_pointer)?;
@@ -1129,35 +1066,15 @@ impl<IO: HostIO> NativeCpu<IO> {
                     let b = f32::from_bits(self.registers[reg2 as usize]);
 
                     if self.verbose {
-                        println!("FCMP R{}({}), R{}({}) => (flags updated for {} - {})", reg1, a, reg2, b, a, b);
+                        println!(
+                            "FCMP R{}({}), R{}({}) => (flags updated for {} - {})",
+                            reg1, a, reg2, b, a, b
+                        );
                     }
 
-                    // Update flags as if we did SUB, but do not store result anywhere.
                     self.update_flags_float(a, b);
 
-                    self.stats.cycles += 2; // or however many cycles CMP should cost
-                }
-                Bytecode::CmpValue => {
-                    let reg = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
-
-                    let imm = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
-
-                    let a = self.registers[reg as usize];
-                    let b = imm;
-
-                    // Perform a subtraction in a temporary variable just to get flags.
-                    let result = a.wrapping_sub(b);
-
-                    if self.verbose {
-                        println!("CMP R{}({}), {} => (flags updated for {} - {})", reg, a, b, a, b);
-                    }
-
-                    // Update flags as if we did SUB, but do not store result anywhere.
-                    self.update_flags_sub(a, b, result);
-
-                    self.stats.cycles += 1; // or however many cycles CMP should cost
+                    self.stats.cycles += 2;
                 }
                 Bytecode::FCmpValue => {
                     let reg = self.read_memory(self.instruction_pointer)?;
@@ -1170,54 +1087,106 @@ impl<IO: HostIO> NativeCpu<IO> {
                     let b = f32::from_bits(imm);
 
                     if self.verbose {
-                        println!("FCMP R{}({}), {} => (flags updated for {} - {})", reg, a, b, a, b);
+                        println!(
+                            "FCMP R{}({}), {} => (flags updated for {} - {})",
+                            reg, a, b, a, b
+                        );
                     }
 
-                    // Update flags as if we did SUB, but do not store result anywhere.
                     self.update_flags_float(a, b);
 
-                    self.stats.cycles += 2; // or however many cycles CMP should cost
+                    self.stats.cycles += 2;
                 }
-                Bytecode::Je |
-                Bytecode::Jne |
-                Bytecode::Jg |
-                Bytecode::Jge |
-                Bytecode::Jl |
-                Bytecode::Jle |
-                Bytecode::Ja |
-                Bytecode::Jae |
-                Bytecode::Jb |
-                Bytecode::Jbe |
-                Bytecode::Jc |
-                Bytecode::Jnc |
-                Bytecode::Jo |
-                Bytecode::Jno |
-                Bytecode::Js |
-                Bytecode::Jns |
-                Bytecode::Jp | // if parity is implemented
-                Bytecode::Jnp | // if parity is implemented
-                Bytecode::Jxcz => {
-                    // All these jump instructions have the same pattern: they read an immediate address
+                Bytecode::Jmp => {
+                    let imm = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer = imm;
+
+                    if self.verbose {
+                        println!("JMP {}", imm);
+                    }
+
+                    self.stats.cycles += 1;
+                }
+                Bytecode::Je
+                | Bytecode::Jne
+                | Bytecode::Jg
+                | Bytecode::Jge
+                | Bytecode::Jl
+                | Bytecode::Jle
+                | Bytecode::Ja
+                | Bytecode::Jae
+                | Bytecode::Jb
+                | Bytecode::Jbe
+                | Bytecode::Jc
+                | Bytecode::Jnc
+                | Bytecode::Jo
+                | Bytecode::Jno
+                | Bytecode::Js
+                | Bytecode::Jns
+                | Bytecode::Jxcz => {
                     let imm = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
-                    // Check if we should jump
                     if self.should_jump(opcode) {
                         if self.verbose {
-                            println!("CONDITIONAL JUMP to {}", imm);
+                            println!("CONDITIONAL JUMP ({opcode}) to {imm}");
                         }
                         self.instruction_pointer = imm;
                     } else if self.verbose {
-                            println!("CONDITIONAL JUMP not taken");
+                        println!("CONDITIONAL JUMP ({opcode}) not taken");
                     }
 
                     self.stats.cycles += 2;
                 }
-                Bytecode::Nop => {
+                Bytecode::Call => {
+                    let target = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
                     if self.verbose {
-                        println!("NOP");
+                        println!("CALL @{target:#02x}");
                     }
-                    self.stats.cycles += 1;
+
+                    self.push_stack(self.instruction_pointer)?;
+
+                    self.instruction_pointer = target;
+
+                    self.stats.cycles += 25;
+                }
+                Bytecode::Ret => {
+                    let return_address = self.pop_stack()?;
+
+                    if self.verbose {
+                        println!("RET to @{return_address:#02x}");
+                    }
+
+                    self.instruction_pointer = return_address;
+                    self.stats.cycles += 5;
+                }
+                Bytecode::Syscall => {
+                    let code = self.registers[0];
+                    if self.verbose {
+                        println!("SYSCALL code={}", code);
+                    }
+
+                    if let Some(mut host_io) = self.host_io.take() {
+                        let return_value = host_io.syscall(code, self)?;
+                        self.stats.cycles += return_value;
+                        self.host_io.replace(host_io);
+                    } else {
+                        return Err(ExecutionError::NoHostIO);
+                    }
+                }
+                Bytecode::Inspect => {
+                    let addr = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    println!("INSPECT @{:#02x} = {}", addr, self.read_memory(addr)?);
+                }
+                Bytecode::Halt => {
+                    if self.verbose {
+                        println!("HALT");
+                    }
+                    break;
                 }
             }
             executed += 1;
@@ -1229,7 +1198,7 @@ impl<IO: HostIO> NativeCpu<IO> {
         if (address as usize) < self.memory.len() {
             Ok(())
         } else {
-            Err(ExecutionError::InvalidMemoryLocation)
+            Err(ExecutionError::InvalidMemoryLocation(address))
         }
     }
 
@@ -1255,9 +1224,8 @@ impl<IO: HostIO> NativeCpu<IO> {
 
 #[cfg(test)]
 mod tests {
-    use super::*; // Use your CPU and Bytecode types from the parent module
+    use super::*;
 
-    // Helper function to run a small program and return the CPU state afterwards
     fn run_program(program: &[u32], memory_size: u32, registers: u8) -> NativeCpu<NullHostIO> {
         let mut cpu = NativeCpu::new(memory_size, registers, NullHostIO);
         cpu.load_memory(0, program);
@@ -1270,7 +1238,6 @@ mod tests {
         let program = &[Bytecode::Nop as u32, Bytecode::Halt as u32];
 
         let cpu = run_program(program, 128, 4);
-        // Just check that nothing broke and IP advanced
         assert_eq!(cpu.instruction_pointer, 2);
     }
 
@@ -1304,8 +1271,6 @@ mod tests {
 
         let cpu = run_program(program, 128, 4);
         assert_eq!(cpu.get_registers()[0], 15);
-        // Check flags if needed
-        // e.g. zero flag should be false:
         assert!(!cpu.flags.zero);
     }
 
@@ -1370,11 +1335,6 @@ mod tests {
 
     #[test]
     fn test_cmp_je() {
-        // Note: The code above may need adjustments to align addresses.
-        // Let's place the jump target instructions right after HALT:
-        // We'll move them and just trust the indexing works out for this example.
-
-        // Actually, let's make it simpler. We'll jump ahead by fewer instructions:
         let program = &[
             Bytecode::LoadValue as u32,
             0,
@@ -1386,7 +1346,7 @@ mod tests {
             0,
             1,
             Bytecode::Je as u32,
-            15, // Jump to index 15
+            15,
             Bytecode::LoadValue as u32,
             2,
             100, // If not equal, R2=100
@@ -1399,7 +1359,6 @@ mod tests {
         ];
 
         let cpu = run_program(program, 128, 4);
-        // Since R0 == R1, we jumped to the second LoadValue
         assert_eq!(cpu.get_registers()[2], 999);
     }
 
@@ -1449,10 +1408,9 @@ mod tests {
         assert_eq!(cpu.get_memory()[50], 123);
     }
 
-    // A simple HostIO that records syscall invocations
     #[derive(Debug)]
     struct TestHostIO {
-        pub calls: Vec<(u32, u32, u32)>, // store code and some arguments read from registers
+        pub calls: Vec<(u32, u32, u32)>,
     }
 
     impl HostIO for TestHostIO {
@@ -1461,7 +1419,6 @@ mod tests {
             code: u32,
             cpu: &mut NativeCpu<Self>,
         ) -> Result<usize, ExecutionError> {
-            // For testing, let's say we take R1 and R2 as arguments
             let arg1 = cpu.registers.get(1).copied().unwrap_or(0);
             let arg2 = cpu.registers.get(2).copied().unwrap_or(0);
             self.calls.push((code, arg1, arg2));
@@ -1483,11 +1440,6 @@ mod tests {
 
     #[test]
     fn test_syscall() {
-        // Program:
-        // R0 = syscall code (1)
-        // R1 = 123, R2=456 arguments
-        // Syscall
-        // Halt
         let program = &[
             Bytecode::LoadValue as u32,
             0,
@@ -1510,12 +1462,6 @@ mod tests {
 
     #[test]
     fn test_load_store_byte() {
-        // Test storing a byte and loading it back.
-        // Steps:
-        // LoadValue R0, 42
-        // StoreByte 10, R0   (store 42 at address 10)
-        // LoadByte R1, 10    (load from address 10 into R1)
-        // Halt
         let program = &[
             Bytecode::LoadValue as u32,
             0,
@@ -1536,8 +1482,6 @@ mod tests {
 
     #[test]
     fn test_load_float() {
-        // Load a float immediate into R0
-        // Use a known float: 1.5f32.to_bits()
         let f_val = 1.5f32.to_bits();
         let program = &[Bytecode::LoadValue as u32, 0, f_val, Bytecode::Halt as u32];
 
@@ -1550,7 +1494,6 @@ mod tests {
 
     #[test]
     fn test_fadd() {
-        // Test adding two floats: R0=1.5, R1=2.5, FAdd R0,R1 => R0=4.0
         let f1 = 1.5f32.to_bits();
         let f2 = 2.5f32.to_bits();
         let program = &[
@@ -1574,7 +1517,6 @@ mod tests {
 
     #[test]
     fn test_fsub() {
-        // R0=5.0, R1=3.0, FSub R0,R1 => R0=2.0
         let f5 = 5.0f32.to_bits();
         let f3 = 3.0f32.to_bits();
         let program = &[
@@ -1598,7 +1540,6 @@ mod tests {
 
     #[test]
     fn test_fmul() {
-        // R0=2.0, R1=3.5 => R0=7.0
         let f2 = 2.0f32.to_bits();
         let f3_5 = 3.5f32.to_bits();
         let program = &[
@@ -1622,7 +1563,6 @@ mod tests {
 
     #[test]
     fn test_fdiv() {
-        // R0=10.0, R1=2.0 => R0=5.0
         let f10 = 10.0f32.to_bits();
         let f2 = 2.0f32.to_bits();
         let program = &[

@@ -1,26 +1,30 @@
 use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::Unsigned;
+use strum::Display;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum ExecutionError {
     #[error("This is not implemented yet")]
     NotImplemented,
-    #[error("Trying to access invalid memory location")]
-    InvalidMemoryLocation,
+    #[error("Trying to access invalid memory location (@{:#02x}/@{})", .0, .0)]
+    InvalidMemoryLocation(u32),
     #[error("Stack Overflow")]
     StackOverflow,
     #[error("Stack Underflow")]
     StackUnderflow,
     #[error("Division by zero")]
     DivisionByZero,
-    #[error("Invalid Opcode")]
-    InvalidOpcode,
+    #[error("Invalid Opcode: {} at (@{:#02x}/@{})", .0, .1, .1)]
+    InvalidOpcode(u32, u32),
+    #[error("Host IO not available")]
+    NoHostIO,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CacheHits {
-    pub l1: usize,
+    pub l1i: usize,
+    pub l1d: usize,
     pub l2: usize,
     pub l3: usize,
 }
@@ -47,22 +51,24 @@ pub trait CpuTrait {
 
 #[derive(Debug)]
 pub enum RunMode {
-    Run,              // Run to completion
-    Debug(DebugMode), // Debug mode
-    StepOver,         // Step over calls
-    StepInto,         // Step into calls
-    StepOut,          // Step out of calls
-    RunFor(isize),    // Run for a specific number of cycles
+    Run,
+    Debug(DebugMode),
+    StepOver,
+    StepInto,
+    StepOut,
+    RunFor(isize),
 }
 
 #[derive(Debug)]
 pub enum DebugMode {
-    All,  // Break on any breakpoint
-    Code, // Break on code breakpoints
-    Data, // Break on data breakpoints
+    All,
+    Code,
+    Data,
 }
 
-#[derive(Debug, PartialEq, PartialOrd, Copy, Clone, Hash, Eq, Ord, FromPrimitive, ToPrimitive)]
+#[derive(
+    Debug, Display, PartialEq, PartialOrd, Copy, Clone, Hash, Eq, Ord, FromPrimitive, ToPrimitive,
+)]
 #[repr(u32)]
 pub enum Bytecode {
     Nop = 0x00,
@@ -99,6 +105,7 @@ pub enum Bytecode {
     FCmp = 0xC02,
     FCmpValue = 0xC03,
     Jmp = 0xC04,
+
     // Signed conditions
     Je = 0xC05,  // Jump Equal/Zero (ZF=1)
     Jne = 0xC06, // Jump Not Equal/Not Zero (ZF=0)
@@ -120,8 +127,6 @@ pub enum Bytecode {
     Jno = 0xC12, // Jump If No Overflow (OF=0)
     Js = 0xC13,  // Jump Sign (SF=1)
     Jns = 0xC14, // Jump No Sign (SF=0)
-    Jp = 0xC15,  // Jump Parity (PF=1)
-    Jnp = 0xC16, // Jump No Parity (PF=0)
 
     // Special conditions
     Jxcz = 0xCFF, // Jump if CX is Zero (does not check flags, checks a register)
@@ -129,6 +134,6 @@ pub enum Bytecode {
     Call = 0xF0,
     Ret = 0xF1,
     Syscall = 0xF2,
-    Inspect = 0xFF,
+    Inspect = 0xFFFFFFF0,
     Halt = 0xFFFFFFFF,
 }

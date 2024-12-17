@@ -122,14 +122,13 @@ fn first_pass(program: &str) -> (Vec<ParsedLine>, HashMap<String, u32>) {
         match mnemonic.as_str() {
             "nop" | "halt" | "ret" | "syscall" => 1,
 
-            // load variants
             "load" => 3,
             "store" => 3,
 
             "push" => 2,
             "pop" => 2,
 
-            // arithmetic and cmp
+            // integer arithmetic and cmp
             "add" | "sub" | "mul" | "div" | "cmp" => 3,
 
             // jumps and call
@@ -202,11 +201,9 @@ pub fn assemble_program(program: &str) -> Result<Vec<u32>, AssembleError> {
                 emit(Bytecode::Ret, &[], &mut code);
             }
             "syscall" => {
-                // no arguments, syscall code should be in R0
                 emit(Bytecode::Syscall, &[], &mut code);
             }
 
-            // load/store variants
             "load" => {
                 if tokens.len() < 3 {
                     return Err(AssembleError::MissingArgument(format!("{:?}", tokens)));
@@ -214,15 +211,12 @@ pub fn assemble_program(program: &str) -> Result<Vec<u32>, AssembleError> {
                 let r = reg_arg(tokens[1].trim())?;
                 let second = &tokens[2];
                 if second.starts_with('@') {
-                    // LoadMemory
                     let a = addr_arg(second)?;
                     emit(Bytecode::LoadMemory, &[r, a], &mut code);
                 } else if second.starts_with('R') {
-                    // LoadReg
                     let a = reg_arg(second)?;
                     emit(Bytecode::LoadReg, &[r, a], &mut code);
                 } else {
-                    // LoadValue
                     let i = imm_arg(second)?;
                     emit(Bytecode::LoadValue, &[r, i], &mut code);
                 }
@@ -237,8 +231,6 @@ pub fn assemble_program(program: &str) -> Result<Vec<u32>, AssembleError> {
             }
 
             "push" => {
-                // to remain compatible with previous logic, if you want "push" to handle both imm and reg
-                // just parse and decide:
                 if tokens.len() < 2 {
                     return Err(AssembleError::MissingArgument(format!("{:?}", tokens)));
                 }
@@ -342,7 +334,6 @@ pub fn assemble_program(program: &str) -> Result<Vec<u32>, AssembleError> {
                 emit(op, &[a], &mut code);
             }
 
-            // Byte ops
             "loadbyte" => {
                 if tokens.len() < 3 {
                     return Err(AssembleError::MissingArgument(format!("{:?}", tokens)));
@@ -360,9 +351,7 @@ pub fn assemble_program(program: &str) -> Result<Vec<u32>, AssembleError> {
                 emit(Bytecode::StoreByte, &[a, r], &mut code);
             }
 
-            // Floating point
             "fload" => {
-                // fload R<reg>, <f32>
                 if tokens.len() < 3 {
                     return Err(AssembleError::MissingArgument(format!("{:?}", tokens)));
                 }
@@ -432,7 +421,6 @@ pub fn assemble_program(program: &str) -> Result<Vec<u32>, AssembleError> {
     Ok(code)
 }
 
-// Assuming this code is in the same module or has access to `assemble_program` and `Bytecode`.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -440,25 +428,21 @@ mod tests {
 
     #[test]
     fn test_basic_instructions() {
-        // Test 'nop' instruction
         let program = "nop";
         let expected = vec![Bytecode::Nop.to_u32().unwrap()];
         let result = assemble_program(program).unwrap();
         assert_eq!(result, expected);
 
-        // Test 'halt' instruction
         let program = "halt";
         let expected = vec![Bytecode::Halt.to_u32().unwrap()];
         let result = assemble_program(program).unwrap();
         assert_eq!(result, expected);
 
-        // Test 'ret' instruction
         let program = "ret";
         let expected = vec![Bytecode::Ret.to_u32().unwrap()];
         let result = assemble_program(program).unwrap();
         assert_eq!(result, expected);
 
-        // Test 'syscall' instruction
         let program = "syscall";
         let expected = vec![Bytecode::Syscall.to_u32().unwrap()];
         let result = assemble_program(program).unwrap();
@@ -467,7 +451,6 @@ mod tests {
 
     #[test]
     fn test_register_operations() {
-        // Test 'add R1, R2'
         let program = "add R1, R2";
         let expected = vec![
             Bytecode::Add.to_u32().unwrap(),
@@ -477,7 +460,6 @@ mod tests {
         let result = assemble_program(program).unwrap();
         assert_eq!(result, expected);
 
-        // Test 'mul R5, R6'
         let program = "mul R5, R6";
         let expected = vec![
             Bytecode::Mul.to_u32().unwrap(),
@@ -487,7 +469,6 @@ mod tests {
         let result = assemble_program(program).unwrap();
         assert_eq!(result, expected);
 
-        // Test 'div R7, R8'
         let program = "div R7, R8";
         let expected = vec![
             Bytecode::Div.to_u32().unwrap(),
@@ -497,7 +478,6 @@ mod tests {
         let result = assemble_program(program).unwrap();
         assert_eq!(result, expected);
 
-        // Test 'cmp R9, R10'
         let program = "cmp R9, R10";
         let expected = vec![
             Bytecode::Cmp.to_u32().unwrap(),
@@ -510,7 +490,6 @@ mod tests {
 
     #[test]
     fn test_immediate_operations() {
-        // Test 'load R1, 100'
         let program = "load R1, 100";
         let expected = vec![
             Bytecode::LoadValue.to_u32().unwrap(),
@@ -520,7 +499,6 @@ mod tests {
         let result = assemble_program(program).unwrap();
         assert_eq!(result, expected);
 
-        // Test 'push 200'
         let program = "push 200";
         let expected = vec![
             Bytecode::PushValue.to_u32().unwrap(),
@@ -529,7 +507,6 @@ mod tests {
         let result = assemble_program(program).unwrap();
         assert_eq!(result, expected);
 
-        // Test 'add R1, 50'
         let program = "add R1, 50";
         let expected = vec![
             Bytecode::AddValue.to_u32().unwrap(),
@@ -542,7 +519,6 @@ mod tests {
 
     #[test]
     fn test_address_operations() {
-        // Test 'jmp @100'
         let program = "jmp @100";
         let expected = vec![
             Bytecode::Jmp.to_u32().unwrap(),
@@ -551,13 +527,11 @@ mod tests {
         let result = assemble_program(program).unwrap();
         assert_eq!(result, expected);
 
-        // Test 'call @label'
         let program = "
             call @label
             label:
             nop
         ";
-        // First, determine the address of 'label'. 'call @label' is at address 0, 'label' is at address 2 (call is 2 words: opcode + address), 'nop' is at address 2.
         let expected = vec![
             Bytecode::Call.to_u32().unwrap(),
             2, // Address of 'label'
@@ -569,15 +543,11 @@ mod tests {
 
     #[test]
     fn test_labels() {
-        // Test label definition and jump
         let program = "
             start:
             nop
             jmp @start
         ";
-        // 'start' is at address 0
-        // 'nop' is 1 word
-        // 'jmp @start' is 2 words
         let expected = vec![
             Bytecode::Nop.to_u32().unwrap(),
             Bytecode::Jmp.to_u32().unwrap(),
@@ -589,7 +559,6 @@ mod tests {
 
     #[test]
     fn test_float_operations() {
-        // Test 'fload R1, 3.14'
         let program = "fload R1, 3.1";
         let float_bits = 3.1f32.to_bits();
         let expected = vec![
@@ -600,7 +569,6 @@ mod tests {
         let result = assemble_program(program).unwrap();
         assert_eq!(result, expected);
 
-        // Test 'fadd R1, R2'
         let program = "fadd R1, R2";
         let expected = vec![
             Bytecode::FAddValue.to_u32().unwrap(),
@@ -610,7 +578,6 @@ mod tests {
         let result = assemble_program(program).unwrap();
         assert_eq!(result, expected);
 
-        // Test 'fsub R3, 2.71'
         let program = "fsub R3, 2.71";
         let float_bits = 2.71f32.to_bits();
         let expected = vec![
@@ -624,7 +591,6 @@ mod tests {
 
     #[test]
     fn test_byte_operations() {
-        // Test 'loadbyte R1, @200'
         let program = "loadbyte R1, @200";
         let expected = vec![
             Bytecode::LoadByte.to_u32().unwrap(),
@@ -634,7 +600,6 @@ mod tests {
         let result = assemble_program(program).unwrap();
         assert_eq!(result, expected);
 
-        // Test 'storebyte @300, R2'
         let program = "storebyte @300, R2";
         let expected = vec![
             Bytecode::StoreByte.to_u32().unwrap(),
@@ -647,7 +612,6 @@ mod tests {
 
     #[test]
     fn test_complex_program() {
-        // A more complex program with multiple instructions and labels
         let program = "
             ; This is a comment
             start:
@@ -691,7 +655,6 @@ mod tests {
 
     #[test]
     fn test_invalid_instruction() {
-        // Test an unknown mnemonic
         let program = "unknown R1, R2";
         let result = assemble_program(program);
         assert!(matches!(
@@ -702,7 +665,6 @@ mod tests {
 
     #[test]
     fn test_invalid_register() {
-        // Test invalid register format
         let program = "add RX, R2";
         let result = assemble_program(program);
         assert!(matches!(
@@ -713,7 +675,6 @@ mod tests {
 
     #[test]
     fn test_missing_argument() {
-        // Test missing argument for 'add'
         let program = "add R1";
         let result = assemble_program(program);
         assert!(matches!(
@@ -724,7 +685,6 @@ mod tests {
 
     #[test]
     fn test_invalid_immediate() {
-        // Test invalid immediate value
         let program = "load R1, not_a_number";
         let result = assemble_program(program);
         assert!(matches!(
@@ -735,7 +695,6 @@ mod tests {
 
     #[test]
     fn test_expected_address() {
-        // Test using a non-address operand where address is expected
         let program = "jmp 100";
         let result = assemble_program(program);
         assert!(matches!(
@@ -746,7 +705,6 @@ mod tests {
 
     #[test]
     fn test_unknown_label() {
-        // Test jumping to an undefined label
         let program = "jmp @undefined_label";
         let result = assemble_program(program);
         assert!(matches!(
@@ -757,7 +715,6 @@ mod tests {
 
     #[test]
     fn test_expected_immediate() {
-        // Test using an address where immediate is expected
         let program = "load R1, @100";
         let expected = vec![
             Bytecode::LoadMemory.to_u32().unwrap(),
@@ -770,7 +727,6 @@ mod tests {
 
     #[test]
     fn test_comments_and_whitespace() {
-        // Test that comments and varying whitespace are handled correctly
         let program = "
             ; This is a comment
             load    R1 ,    50   ; Load 50 into R1
@@ -792,7 +748,6 @@ mod tests {
 
     #[test]
     fn test_multiple_labels() {
-        // Test multiple labels and jumps between them
         let program = "
             start:
             nop
@@ -803,15 +758,6 @@ mod tests {
             end:
             halt
         ";
-        // Calculate addresses:
-        // start: address 0
-        // nop: 1
-        // jmp @middle: 2
-        // middle: address 3
-        // add R1, R2: 3 words (opcode + R1 + R2) → address 3 + 3 = 6
-        // jmp @end: 2 words → address 6 + 2 = 8
-        // end: address 8
-        // halt: 1 word → address 8 +1 =9
         let expected = vec![
             // nop
             Bytecode::Nop.to_u32().unwrap(),
@@ -834,7 +780,6 @@ mod tests {
 
     #[test]
     fn test_floating_point_immediates() {
-        // Test floating point immediate values
         let program = "
             fload R1, 1.5
             fadd R1, 2.5

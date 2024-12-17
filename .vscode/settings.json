@@ -3,6 +3,7 @@
 	"[commonlisp]": {
 		"editor.wordSeparators": "`|;:'\",()"
 	},
+	"markdown.extension.toc.levels": "2..6",
 	"cSpell.words": [
 		"byteorder",
 		"FADD",
@@ -12,9 +13,13 @@
 		"FMUL",
 		"FSUB",
 		"hasm",
+		"immediates",
+		"Infographics",
+		"insta",
 		"Jxcz",
 		"loadbyte",
 		"pline",
+		"prefetcher",
 		"repr",
 		"storebyte",
 		"syscall",
