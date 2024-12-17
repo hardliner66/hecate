@@ -276,11 +276,41 @@ pub fn assemble_program(program: &str) -> Result<Vec<u32>, AssembleError> {
                     imm_arg(&tokens[2])?
                 };
                 let op = match mnemonic.as_str() {
-                    "add" => if use_register { Bytecode::Add } else { Bytecode::AddValue },
-                    "sub" => if use_register { Bytecode::Sub } else { Bytecode::SubValue },
-                    "mul" => if use_register { Bytecode::Mul } else { Bytecode::MulValue },
-                    "div" => if use_register { Bytecode::Div } else { Bytecode::DivValue },
-                    "cmp" => if use_register { Bytecode::Cmp } else { Bytecode::CmpValue },
+                    "add" => {
+                        if use_register {
+                            Bytecode::Add
+                        } else {
+                            Bytecode::AddValue
+                        }
+                    }
+                    "sub" => {
+                        if use_register {
+                            Bytecode::Sub
+                        } else {
+                            Bytecode::SubValue
+                        }
+                    }
+                    "mul" => {
+                        if use_register {
+                            Bytecode::Mul
+                        } else {
+                            Bytecode::MulValue
+                        }
+                    }
+                    "div" => {
+                        if use_register {
+                            Bytecode::Div
+                        } else {
+                            Bytecode::DivValue
+                        }
+                    }
+                    "cmp" => {
+                        if use_register {
+                            Bytecode::Cmp
+                        } else {
+                            Bytecode::CmpValue
+                        }
+                    }
                     _ => unreachable!(),
                 };
                 emit(op, &[r1, r2], &mut code);
