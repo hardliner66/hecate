@@ -1,5 +1,5 @@
 [package]
-name = "hecate"
+name = "hecate-vm"
 version = "0.1.0"
 edition = "2021"
 
@@ -7,10 +7,10 @@ edition = "2021"
 anyhow = "1.0.94"
 byteorder = "1.5.0"
 clap = { version = "4.5.22", features = ["derive"] }
-common = { version = "0.1.0", path = "common" }
-hasm = { version = "0.1.0", path = "hasm" }
+hecate-common = { version = "0.1.0", path = "crates/common" }
+hecate-assembler = { version = "0.1.0", path = "crates/assembler" }
 num-derive = "0.4.2"
 num-traits = "0.2.19"
 
 [workspace]
-members = ["common", "hasm"]
+members = ["crates/common", "crates/assembler"]

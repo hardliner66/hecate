@@ -1,8 +1,12 @@
-use std::{fs::File, io::{BufReader, BufWriter}, path::PathBuf};
-use byteorder::{WriteBytesExt, ReadBytesExt, LittleEndian};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use clap::Parser;
-use hasm::disassembler::disassemble_program;
-use hasm::assemble_program;
+use hecate_assembler::assemble_program;
+use hecate_assembler::disassembler::disassemble_program;
+use std::{
+    fs::File,
+    io::{BufReader, BufWriter},
+    path::PathBuf,
+};
 
 #[derive(Parser)]
 struct Args {
@@ -13,7 +17,11 @@ struct Args {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let Args { input, output, disassemble } = Args::parse();
+    let Args {
+        input,
+        output,
+        disassemble,
+    } = Args::parse();
 
     if disassemble {
         let program = read_u32_values(&input)?;

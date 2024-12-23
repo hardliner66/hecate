@@ -1,4 +1,4 @@
-use common::{Bytecode, CpuStats, CpuTrait, ExecutionError, RunMode};
+use hecate_common::{Bytecode, CpuStats, CpuTrait, ExecutionError, RunMode};
 use num_traits::FromPrimitive;
 
 const L1_LATENCY: usize = 3;

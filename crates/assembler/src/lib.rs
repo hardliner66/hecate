@@ -1,6 +1,6 @@
 pub mod disassembler;
 
-use common::Bytecode;
+use hecate_common::Bytecode;
 use num_traits::ToPrimitive;
 use std::collections::HashMap;
 use thiserror::Error;
@@ -426,7 +426,7 @@ pub fn assemble_program(program: &str) -> Result<Vec<u32>, AssembleError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use common::Bytecode;
+    use hecate_common::Bytecode;
 
     #[test]
     fn test_basic_instructions() {
@@ -822,7 +822,7 @@ mod tests {
 
     #[test]
     fn test_assemble_program() {
-        let words = assemble_program(include_str!("../../demo.hasm")).unwrap();
+        let words = assemble_program(include_str!("../../../demo.hasm")).unwrap();
         insta::assert_debug_snapshot!(words);
     }
 }

@@ -1,5 +1,5 @@
-use common::Bytecode;
-use num_traits::{FromPrimitive};
+use hecate_common::Bytecode;
+use num_traits::FromPrimitive;
 use std::collections::HashSet;
 
 fn operand_count(opcode: Bytecode) -> usize {
@@ -13,7 +13,6 @@ fn operand_count(opcode: Bytecode) -> usize {
         _ => 2,
     }
 }
-
 
 fn gather_jump_targets(code: &[u32]) -> HashSet<u32> {
     let mut targets = HashSet::new();
@@ -57,7 +56,6 @@ fn gather_jump_targets(code: &[u32]) -> HashSet<u32> {
 
     targets
 }
-
 
 pub fn disassemble_program(code: &[u32]) -> Vec<String> {
     let jump_targets = gather_jump_targets(code);
@@ -229,8 +227,7 @@ pub fn disassemble_program(code: &[u32]) -> Vec<String> {
             | Bytecode::Jns
             | Bytecode::Jxcz
             | Bytecode::Call
-            | Bytecode::Inspect
-             => {
+            | Bytecode::Inspect => {
                 let addr = code.get(i).copied().unwrap_or_default();
                 i += 1;
                 let mnemonic = match opcode {

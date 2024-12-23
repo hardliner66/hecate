@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use byteorder::ReadBytesExt;
 use clap::{Parser, Subcommand};
-use common::{CpuTrait, RunMode};
+use hecate_common::{CpuTrait, RunMode};
 use native::{NativeCpu, NullHostIO};
 use std::io::BufReader;
 
@@ -59,7 +59,7 @@ fn main() -> anyhow::Result<()> {
 
         Action::RunAsm { path } => {
             let program = std::fs::read_to_string(path)?;
-            let memory = hasm::assemble_program(&program)?;
+            let memory = hecate_assembler::assemble_program(&program)?;
 
             run(&memory, verbose)?;
         }
