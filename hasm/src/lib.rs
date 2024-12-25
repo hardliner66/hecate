@@ -1,3 +1,5 @@
+pub mod disassembler;
+
 use common::Bytecode;
 use num_traits::ToPrimitive;
 use std::collections::HashMap;
