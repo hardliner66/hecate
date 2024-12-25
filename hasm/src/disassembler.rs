@@ -1,11 +1,75 @@
 use common::Bytecode;
-use num_traits::{FromPrimitive, ToPrimitive};
+use num_traits::{FromPrimitive};
+use std::collections::HashSet;
+
+fn operand_count(opcode: Bytecode) -> usize {
+    use Bytecode::*;
+    match opcode {
+        Nop | Halt | Ret | Syscall => 0,
+
+        Jmp | Je | Jne | Jg | Jge | Jl | Jle | Ja | Jae | Jb | Jbe | Jc | Jnc | Jo | Jno | Js
+        | Jns | Jxcz | Call | Inspect => 1,
+
+        _ => 2,
+    }
+}
+
+
+fn gather_jump_targets(code: &[u32]) -> HashSet<u32> {
+    let mut targets = HashSet::new();
+    let mut i = 0;
+
+    while i < code.len() {
+        let opcode_val = code[i];
+        i += 1;
+
+        if let Some(opcode) = Bytecode::from_u32(opcode_val) {
+            match opcode {
+                Bytecode::Jmp
+                | Bytecode::Je
+                | Bytecode::Jne
+                | Bytecode::Jg
+                | Bytecode::Jge
+                | Bytecode::Jl
+                | Bytecode::Jle
+                | Bytecode::Ja
+                | Bytecode::Jae
+                | Bytecode::Jb
+                | Bytecode::Jbe
+                | Bytecode::Jc
+                | Bytecode::Jnc
+                | Bytecode::Jo
+                | Bytecode::Jno
+                | Bytecode::Js
+                | Bytecode::Jns
+                | Bytecode::Jxcz
+                | Bytecode::Call => {
+                    if let Some(&addr) = code.get(i) {
+                        targets.insert(addr);
+                    }
+                }
+                _ => {}
+            }
+
+            i += operand_count(opcode);
+        }
+    }
+
+    targets
+}
+
 
 pub fn disassemble_program(code: &[u32]) -> Vec<String> {
+    let jump_targets = gather_jump_targets(code);
+
     let mut lines = Vec::new();
     let mut i = 0;
 
     while i < code.len() {
+        if jump_targets.contains(&(i as u32)) {
+            lines.push(format!("label_{}:", i));
+        }
+
         let opcode_val = code[i];
         i += 1;
 
@@ -165,7 +229,8 @@ pub fn disassemble_program(code: &[u32]) -> Vec<String> {
             | Bytecode::Jns
             | Bytecode::Jxcz
             | Bytecode::Call
-            | Bytecode::Inspect => {
+            | Bytecode::Inspect
+             => {
                 let addr = code.get(i).copied().unwrap_or_default();
                 i += 1;
                 let mnemonic = match opcode {
@@ -191,9 +256,12 @@ pub fn disassemble_program(code: &[u32]) -> Vec<String> {
                     Bytecode::Inspect => "inspect",
                     _ => unreachable!(),
                 };
-                lines.push(format!("{} @{}", mnemonic, addr));
+                if jump_targets.contains(&addr) {
+                    lines.push(format!("{} @label_{}", mnemonic, addr));
+                } else {
+                    lines.push(format!("{} @{}", mnemonic, addr));
+                }
             }
-
             Bytecode::LoadByte => {
                 let r = code.get(i).copied().unwrap_or_default();
                 let addr = code.get(i + 1).copied().unwrap_or_default();
