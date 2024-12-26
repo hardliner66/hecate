@@ -61,7 +61,7 @@ fn main() -> anyhow::Result<()> {
             let program = std::fs::read_to_string(path)?;
             let memory = hecate_assembler::assemble_program(&program)?;
 
-            run(&memory, verbose)?;
+            run(&memory.data, verbose)?;
         }
     }
 

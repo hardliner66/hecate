@@ -1,6 +1,6 @@
 pub mod disassembler;
 
-use hecate_common::Bytecode;
+use hecate_common::{Bytecode, BytecodeFile};
 use num_traits::ToPrimitive;
 use std::collections::HashMap;
 use thiserror::Error;
@@ -161,7 +161,7 @@ fn first_pass(program: &str) -> (Vec<ParsedLine>, HashMap<String, u32>) {
     (parsed_lines, label_map)
 }
 
-pub fn assemble_program(program: &str) -> Result<Vec<u32>, AssembleError> {
+pub fn assemble_program(program: &str) -> Result<BytecodeFile, AssembleError> {
     let (parsed_lines, label_map) = first_pass(program);
 
     let mut code = Vec::new();
@@ -420,7 +420,12 @@ pub fn assemble_program(program: &str) -> Result<Vec<u32>, AssembleError> {
         }
     }
 
-    Ok(code)
+    Ok(BytecodeFile {
+        header: hecate_common::BytecodeFileHeader {
+            labels: label_map.clone(),
+        },
+        data: code,
+    })
 }
 
 #[cfg(test)]
@@ -431,22 +436,22 @@ mod tests {
     #[test]
     fn test_basic_instructions() {
         let program = "nop";
-        let expected = vec![Bytecode::Nop.to_u32().unwrap()];
+        let expected = vec![Bytecode::Nop.to_u32().unwrap()].into();
         let result = assemble_program(program).unwrap();
         assert_eq!(result, expected);
 
         let program = "halt";
-        let expected = vec![Bytecode::Halt.to_u32().unwrap()];
+        let expected = vec![Bytecode::Halt.to_u32().unwrap()].into();
         let result = assemble_program(program).unwrap();
         assert_eq!(result, expected);
 
         let program = "ret";
-        let expected = vec![Bytecode::Ret.to_u32().unwrap()];
+        let expected = vec![Bytecode::Ret.to_u32().unwrap()].into();
         let result = assemble_program(program).unwrap();
         assert_eq!(result, expected);
 
         let program = "syscall";
-        let expected = vec![Bytecode::Syscall.to_u32().unwrap()];
+        let expected = vec![Bytecode::Syscall.to_u32().unwrap()].into();
         let result = assemble_program(program).unwrap();
         assert_eq!(result, expected);
     }
@@ -458,7 +463,8 @@ mod tests {
             Bytecode::Add.to_u32().unwrap(),
             1, // R1
             2, // R2
-        ];
+        ]
+        .into();
         let result = assemble_program(program).unwrap();
         assert_eq!(result, expected);
 
@@ -467,7 +473,8 @@ mod tests {
             Bytecode::Mul.to_u32().unwrap(),
             5, // R5
             6, // R6
-        ];
+        ]
+        .into();
         let result = assemble_program(program).unwrap();
         assert_eq!(result, expected);
 
@@ -476,7 +483,8 @@ mod tests {
             Bytecode::Div.to_u32().unwrap(),
             7, // R7
             8, // R8
-        ];
+        ]
+        .into();
         let result = assemble_program(program).unwrap();
         assert_eq!(result, expected);
 
@@ -485,7 +493,8 @@ mod tests {
             Bytecode::Cmp.to_u32().unwrap(),
             9,  // R9
             10, // R10
-        ];
+        ]
+        .into();
         let result = assemble_program(program).unwrap();
         assert_eq!(result, expected);
     }
@@ -497,7 +506,8 @@ mod tests {
             Bytecode::LoadValue.to_u32().unwrap(),
             1,   // R1
             100, // Immediate value
-        ];
+        ]
+        .into();
         let result = assemble_program(program).unwrap();
         assert_eq!(result, expected);
 
@@ -505,7 +515,8 @@ mod tests {
         let expected = vec![
             Bytecode::PushValue.to_u32().unwrap(),
             200, // Immediate value
-        ];
+        ]
+        .into();
         let result = assemble_program(program).unwrap();
         assert_eq!(result, expected);
 
@@ -514,7 +525,8 @@ mod tests {
             Bytecode::AddValue.to_u32().unwrap(),
             1,  // R1
             50, // Immediate value
-        ];
+        ]
+        .into();
         let result = assemble_program(program).unwrap();
         assert_eq!(result, expected);
     }
@@ -525,7 +537,8 @@ mod tests {
         let expected = vec![
             Bytecode::Jmp.to_u32().unwrap(),
             100, // Address
-        ];
+        ]
+        .into();
         let result = assemble_program(program).unwrap();
         assert_eq!(result, expected);
 
@@ -538,7 +551,8 @@ mod tests {
             Bytecode::Call.to_u32().unwrap(),
             2, // Address of 'label'
             Bytecode::Nop.to_u32().unwrap(),
-        ];
+        ]
+        .into();
         let result = assemble_program(program).unwrap();
         assert_eq!(result, expected);
     }
@@ -554,7 +568,8 @@ mod tests {
             Bytecode::Nop.to_u32().unwrap(),
             Bytecode::Jmp.to_u32().unwrap(),
             0, // Address of 'start'
-        ];
+        ]
+        .into();
         let result = assemble_program(program).unwrap();
         assert_eq!(result, expected);
     }
@@ -567,7 +582,8 @@ mod tests {
             Bytecode::LoadValue.to_u32().unwrap(),
             1,          // R1
             float_bits, // Immediate float value as bits
-        ];
+        ]
+        .into();
         let result = assemble_program(program).unwrap();
         assert_eq!(result, expected);
 
@@ -576,7 +592,8 @@ mod tests {
             Bytecode::FAddValue.to_u32().unwrap(),
             1, // R1
             2, // R2
-        ];
+        ]
+        .into();
         let result = assemble_program(program).unwrap();
         assert_eq!(result, expected);
 
@@ -586,7 +603,8 @@ mod tests {
             Bytecode::FSub.to_u32().unwrap(),
             3,          // R3
             float_bits, // Immediate float value as bits
-        ];
+        ]
+        .into();
         let result = assemble_program(program).unwrap();
         assert_eq!(result, expected);
     }
@@ -598,7 +616,8 @@ mod tests {
             Bytecode::LoadByte.to_u32().unwrap(),
             1,   // R1
             200, // Address
-        ];
+        ]
+        .into();
         let result = assemble_program(program).unwrap();
         assert_eq!(result, expected);
 
@@ -607,7 +626,8 @@ mod tests {
             Bytecode::StoreByte.to_u32().unwrap(),
             300, // Address
             2,   // R2
-        ];
+        ]
+        .into();
         let result = assemble_program(program).unwrap();
         assert_eq!(result, expected);
     }
@@ -650,7 +670,8 @@ mod tests {
             Bytecode::Nop.to_u32().unwrap(),
             // halt
             Bytecode::Halt.to_u32().unwrap(),
-        ];
+        ]
+        .into();
         let result = assemble_program(program).unwrap();
         assert_eq!(result, expected);
     }
@@ -722,7 +743,8 @@ mod tests {
             Bytecode::LoadMemory.to_u32().unwrap(),
             1,   // R1
             100, // Address @100
-        ];
+        ]
+        .into();
         let result = assemble_program(program).unwrap();
         assert_eq!(result, expected);
     }
@@ -743,7 +765,8 @@ mod tests {
             Bytecode::PushReg.to_u32().unwrap(),
             1, // R1
             Bytecode::Nop.to_u32().unwrap(),
-        ];
+        ]
+        .into();
         let result = assemble_program(program).unwrap();
         assert_eq!(result, expected);
     }
@@ -775,7 +798,8 @@ mod tests {
             8, // Address of 'end'
             // halt
             Bytecode::Halt.to_u32().unwrap(),
-        ];
+        ]
+        .into();
         let result = assemble_program(program).unwrap();
         assert_eq!(result, expected);
     }
@@ -815,7 +839,8 @@ mod tests {
             Bytecode::FCmp.to_u32().unwrap(),
             1,                // R1
             0.0f32.to_bits(), // Immediate float
-        ];
+        ]
+        .into();
         let result = assemble_program(program).unwrap();
         assert_eq!(result, expected);
     }

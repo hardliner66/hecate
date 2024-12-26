@@ -1,4 +1,4 @@
-use hecate_common::Bytecode;
+use hecate_common::{Bytecode, BytecodeFile};
 use num_traits::FromPrimitive;
 use std::collections::HashSet;
 
@@ -57,14 +57,17 @@ fn gather_jump_targets(code: &[u32]) -> HashSet<u32> {
     targets
 }
 
-pub fn disassemble_program(code: &[u32]) -> Vec<String> {
+pub fn disassemble_program(file: &BytecodeFile) -> Vec<String> {
+    let code = &file.data;
     let jump_targets = gather_jump_targets(code);
 
     let mut lines = Vec::new();
     let mut i = 0;
 
     while i < code.len() {
-        if jump_targets.contains(&(i as u32)) {
+        if let Some((label, _)) = file.header.labels.iter().find(|(_, a)| **a as usize == i) {
+            lines.push(format!("{label}:"));
+        } else if jump_targets.contains(&(i as u32)) {
             lines.push(format!("label_{}:", i));
         }
 
@@ -253,7 +256,9 @@ pub fn disassemble_program(code: &[u32]) -> Vec<String> {
                     Bytecode::Inspect => "inspect",
                     _ => unreachable!(),
                 };
-                if jump_targets.contains(&addr) {
+                if let Some((label, _)) = file.header.labels.iter().find(|(_, a)| **a == addr) {
+                    lines.push(format!("{} @{}", mnemonic, label));
+                } else if jump_targets.contains(&addr) {
                     lines.push(format!("{} @label_{}", mnemonic, addr));
                 } else {
                     lines.push(format!("{} @{}", mnemonic, addr));
@@ -342,4 +347,13 @@ pub fn disassemble_program(code: &[u32]) -> Vec<String> {
     }
 
     lines
+        .into_iter()
+        .map(|l| {
+            if l.trim().ends_with(":") {
+                l
+            } else {
+                format!("  {l}")
+            }
+        })
+        .collect()
 }

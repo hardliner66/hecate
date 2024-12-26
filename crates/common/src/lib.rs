@@ -1,5 +1,14 @@
+use std::{
+    collections::HashMap,
+    error::Error,
+    fs::File,
+    io::{BufReader, BufWriter},
+    path::Path,
+};
+
 use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::Unsigned;
+use serde::{Deserialize, Serialize};
 use strum::Display;
 use thiserror::Error;
 
@@ -64,6 +73,40 @@ pub enum DebugMode {
     All,
     Code,
     Data,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct BytecodeFileHeader {
+    pub labels: HashMap<String, u32>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct BytecodeFile {
+    pub header: BytecodeFileHeader,
+    pub data: Vec<u32>,
+}
+
+impl BytecodeFile {
+    pub fn new(data: Vec<u32>) -> Self {
+        Self {
+            data,
+            ..Default::default()
+        }
+    }
+    pub fn load<P: AsRef<Path>>(p: P) -> Result<Self, Box<dyn Error>> {
+        let reader = BufReader::new(File::open(p.as_ref())?);
+        Ok(bincode::deserialize_from(reader)?)
+    }
+    pub fn save<P: AsRef<Path>>(&self, p: P) -> Result<(), Box<dyn Error>> {
+        let reader = BufWriter::new(File::create(p.as_ref())?);
+        Ok(bincode::serialize_into(reader, self)?)
+    }
+}
+
+impl From<Vec<u32>> for BytecodeFile {
+    fn from(value: Vec<u32>) -> Self {
+        Self::new(value)
+    }
 }
 
 #[derive(
