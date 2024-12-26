@@ -8,8 +8,9 @@ use std::{
 
 use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::Unsigned;
+use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use strum::Display;
+use strum::{Display, EnumIter};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -110,7 +111,18 @@ impl From<Vec<u32>> for BytecodeFile {
 }
 
 #[derive(
-    Debug, Display, PartialEq, PartialOrd, Copy, Clone, Hash, Eq, Ord, FromPrimitive, ToPrimitive,
+    Debug,
+    Display,
+    PartialEq,
+    PartialOrd,
+    Copy,
+    Clone,
+    Hash,
+    Eq,
+    Ord,
+    FromPrimitive,
+    ToPrimitive,
+    EnumIter,
 )]
 #[repr(u32)]
 pub enum Bytecode {
@@ -179,4 +191,149 @@ pub enum Bytecode {
     Syscall = 0xF2,
     Inspect = 0xFFFFFFF0,
     Halt = 0xFFFFFFFF,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OperandType {
+    Register,       // A register reference
+    ImmediateI32,   // 32-bit immediate integer
+    ImmediateF32,   // 32-bit immediate float
+    MemoryAddress,  // Memory address
+    LabelOrAddress, // Jump/call target
+}
+
+#[derive(Debug, Clone)]
+pub struct InstructionPattern {
+    pub bytecode: Bytecode,
+    pub operands: &'static [OperandType],
+    pub mnemonic: &'static str,
+}
+
+impl InstructionPattern {
+    const fn new(
+        bytecode: Bytecode,
+        operands: &'static [OperandType],
+        mnemonic: &'static str,
+    ) -> Self {
+        Self {
+            bytecode,
+            operands,
+            mnemonic,
+        }
+    }
+}
+
+pub static INSTRUCTION_PATTERNS: Lazy<HashMap<Bytecode, &'static InstructionPattern>> =
+    Lazy::new(|| {
+        use OperandType::*;
+
+        static PATTERNS: &[InstructionPattern] = &[
+            InstructionPattern::new(Bytecode::Nop, &[], "nop"),
+            InstructionPattern::new(Bytecode::LoadMemory, &[Register, MemoryAddress], "load"),
+            InstructionPattern::new(Bytecode::LoadValue, &[Register, ImmediateI32], "loadi"),
+            InstructionPattern::new(Bytecode::LoadReg, &[Register, Register], "loadr"),
+            InstructionPattern::new(Bytecode::Store, &[MemoryAddress, Register], "store"),
+            InstructionPattern::new(Bytecode::PushValue, &[ImmediateI32], "pushi"),
+            InstructionPattern::new(Bytecode::PushReg, &[Register], "push"),
+            InstructionPattern::new(Bytecode::Pop, &[Register], "pop"),
+            // Arithmetic operations
+            InstructionPattern::new(Bytecode::Add, &[Register, Register], "add"),
+            InstructionPattern::new(Bytecode::AddValue, &[Register, ImmediateI32], "addi"),
+            InstructionPattern::new(Bytecode::Sub, &[Register, Register], "sub"),
+            InstructionPattern::new(Bytecode::SubValue, &[Register, ImmediateI32], "subi"),
+            InstructionPattern::new(Bytecode::Mul, &[Register, Register], "mul"),
+            InstructionPattern::new(Bytecode::MulValue, &[Register, ImmediateI32], "muli"),
+            InstructionPattern::new(Bytecode::Div, &[Register, Register], "div"),
+            InstructionPattern::new(Bytecode::DivValue, &[Register, ImmediateI32], "divi"),
+            // Arithmetic operations (float)
+            InstructionPattern::new(Bytecode::FAdd, &[Register, Register], "fadd"),
+            InstructionPattern::new(Bytecode::FAddValue, &[Register, ImmediateF32], "faddi"),
+            InstructionPattern::new(Bytecode::FSub, &[Register, Register], "fsub"),
+            InstructionPattern::new(Bytecode::FSubValue, &[Register, ImmediateF32], "fsubi"),
+            InstructionPattern::new(Bytecode::FMul, &[Register, Register], "fmul"),
+            InstructionPattern::new(Bytecode::FMulValue, &[Register, ImmediateF32], "fmuli"),
+            InstructionPattern::new(Bytecode::FDiv, &[Register, Register], "fdiv"),
+            InstructionPattern::new(Bytecode::FDivValue, &[Register, ImmediateF32], "fdivi"),
+            // Memory operations
+            InstructionPattern::new(Bytecode::LoadByte, &[Register, MemoryAddress], "loadbyte"),
+            InstructionPattern::new(Bytecode::StoreByte, &[MemoryAddress, Register], "storebyte"),
+            // Comparison and jumps
+            InstructionPattern::new(Bytecode::Cmp, &[Register, Register], "cmp"),
+            InstructionPattern::new(Bytecode::CmpValue, &[Register, ImmediateI32], "cmpi"),
+            InstructionPattern::new(Bytecode::FCmp, &[Register, Register], "fcmp"),
+            InstructionPattern::new(Bytecode::FCmpValue, &[Register, ImmediateF32], "fcmpi"),
+            InstructionPattern::new(Bytecode::Jmp, &[LabelOrAddress], "jmp"),
+            InstructionPattern::new(Bytecode::Je, &[LabelOrAddress], "je"),
+            InstructionPattern::new(Bytecode::Jne, &[LabelOrAddress], "jne"),
+            InstructionPattern::new(Bytecode::Jg, &[LabelOrAddress], "jg"),
+            InstructionPattern::new(Bytecode::Jge, &[LabelOrAddress], "jge"),
+            InstructionPattern::new(Bytecode::Jl, &[LabelOrAddress], "jl"),
+            InstructionPattern::new(Bytecode::Jle, &[LabelOrAddress], "jle"),
+            InstructionPattern::new(Bytecode::Ja, &[LabelOrAddress], "ja"),
+            InstructionPattern::new(Bytecode::Jae, &[LabelOrAddress], "jae"),
+            InstructionPattern::new(Bytecode::Jb, &[LabelOrAddress], "jb"),
+            InstructionPattern::new(Bytecode::Jbe, &[LabelOrAddress], "jbe"),
+            InstructionPattern::new(Bytecode::Jc, &[LabelOrAddress], "jc"),
+            InstructionPattern::new(Bytecode::Jnc, &[LabelOrAddress], "jnc"),
+            InstructionPattern::new(Bytecode::Jo, &[LabelOrAddress], "jo"),
+            InstructionPattern::new(Bytecode::Jno, &[LabelOrAddress], "jno"),
+            InstructionPattern::new(Bytecode::Js, &[LabelOrAddress], "js"),
+            InstructionPattern::new(Bytecode::Jns, &[LabelOrAddress], "jns"),
+            InstructionPattern::new(Bytecode::Jxcz, &[LabelOrAddress], "jxcz"),
+            // Function calls and system
+            InstructionPattern::new(Bytecode::Call, &[LabelOrAddress], "call"),
+            InstructionPattern::new(Bytecode::Ret, &[], "ret"),
+            InstructionPattern::new(Bytecode::Syscall, &[], "syscall"),
+            InstructionPattern::new(Bytecode::Inspect, &[MemoryAddress], "inspect"),
+            InstructionPattern::new(Bytecode::Halt, &[], "halt"),
+        ];
+
+        let mut map = HashMap::new();
+        for pattern in PATTERNS {
+            map.insert(pattern.bytecode, pattern);
+        }
+        map
+    });
+
+// Helper functions for the assembler/disassembler
+pub fn get_pattern(bytecode: Bytecode) -> Option<&'static InstructionPattern> {
+    INSTRUCTION_PATTERNS.get(&bytecode).copied()
+}
+
+pub fn get_pattern_by_mnemonic(mnemonic: &str) -> Option<&'static InstructionPattern> {
+    INSTRUCTION_PATTERNS
+        .values()
+        .find(|pattern| pattern.mnemonic == mnemonic)
+        .copied()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use strum::IntoEnumIterator;
+
+    #[test]
+    fn test_all_covered() {
+        for b in Bytecode::iter() {
+            assert!(
+                get_pattern(b).is_some(),
+                "Pattern not implemented for bytecode: {b:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_pattern_lookup() {
+        let pattern = get_pattern(Bytecode::Add).unwrap();
+        assert_eq!(pattern.mnemonic, "add");
+        assert_eq!(pattern.operands.len(), 2);
+        assert_eq!(pattern.operands[0], OperandType::Register);
+    }
+
+    #[test]
+    fn test_mnemonic_lookup() {
+        let pattern = get_pattern_by_mnemonic("add").unwrap();
+        assert_eq!(pattern.bytecode, Bytecode::Add);
+        assert_eq!(pattern.operands.len(), 2);
+    }
 }
