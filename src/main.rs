@@ -1,10 +1,8 @@
 use std::path::PathBuf;
 
-use byteorder::ReadBytesExt;
 use clap::{Parser, Subcommand};
-use hecate_common::{CpuTrait, RunMode};
+use hecate_common::{BytecodeFile, CpuTrait, RunMode};
 use native::{NativeCpu, NullHostIO};
-use std::io::BufReader;
 
 mod native;
 
@@ -43,23 +41,15 @@ fn main() -> anyhow::Result<()> {
 
     match action {
         Action::Run { path } => {
-            let memory = std::fs::File::open(path)
-                .map(|file| {
-                    let mut reader = BufReader::new(file);
-                    let mut values = Vec::new();
-                    while let Ok(v) = reader.read_u32::<byteorder::LittleEndian>() {
-                        values.push(v);
-                    }
-                    values
-                })
-                .unwrap();
+            let file = BytecodeFile::load(path).unwrap();
 
-            run(&memory, verbose)?;
+            run(&file.data, verbose)?;
         }
 
         Action::RunAsm { path } => {
             let program = std::fs::read_to_string(path)?;
-            let memory = hecate_assembler::assemble_program(&program)?;
+            let mut assembler = hecate_assembler::Assembler::new();
+            let memory = assembler.assemble_program(&program)?;
 
             run(&memory.data, verbose)?;
         }

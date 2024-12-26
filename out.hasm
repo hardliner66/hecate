@@ -1,0 +1,15 @@
+main:
+    loadi R2, 5
+    loadr R0, R2
+    call @loop
+    store @1000, R0
+    inspect @1000
+    halt
+loop:
+    cmpi R2, 1
+    jle @end
+    subi R2, 1
+    mul R0, R2
+    jmp @loop
+end:
+    ret

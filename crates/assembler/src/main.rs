@@ -1,13 +1,7 @@
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use clap::Parser;
-use hecate_assembler::assemble_program;
-use hecate_assembler::disassembler::disassemble_program;
+use hecate_assembler::{Assembler, Disassembler};
 use hecate_common::BytecodeFile;
-use std::{
-    fs::File,
-    io::{BufReader, BufWriter},
-    path::PathBuf,
-};
+use std::path::PathBuf;
 
 #[derive(Parser)]
 struct Args {
@@ -26,37 +20,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if disassemble {
         let program = BytecodeFile::load(input)?;
-        let code = disassemble_program(&program);
-        let combined_code = code.join("\n");
-        std::fs::write(&output, combined_code)
+        let disassembler = Disassembler::from_bytecode_file(&program);
+        let code = disassembler.disassemble_program(&program.data)?;
+        std::fs::write(&output, code)
             .map_err(|e| format!("Failed to write output file '{}': {e}", output.display()))?;
     } else {
         let program = std::fs::read_to_string(&input)?;
-        let code = assemble_program(&program)?;
+        let mut assembler = Assembler::new();
+        let code = assembler.assemble_program(&program)?;
         code.save(output)?;
-    }
-
-    Ok(())
-}
-
-fn read_u32_values(input: &PathBuf) -> Result<Vec<u32>, Box<dyn std::error::Error>> {
-    let file = File::open(input)?;
-    let mut reader = BufReader::new(file);
-
-    let mut values = Vec::new();
-    while let Ok(value) = reader.read_u32::<LittleEndian>() {
-        values.push(value);
-    }
-
-    Ok(values)
-}
-
-fn write_u32_values(output: &PathBuf, values: &[u32]) -> Result<(), Box<dyn std::error::Error>> {
-    let file = File::create(output)?;
-    let mut writer = BufWriter::new(file);
-
-    for &value in values {
-        writer.write_u32::<LittleEndian>(value)?;
     }
 
     Ok(())
