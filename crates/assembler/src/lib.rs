@@ -1,5 +1,6 @@
 use hecate_common::{
-    get_pattern, get_pattern_by_mnemonic, Bytecode, BytecodeFile, BytecodeFileHeader, OperandType,
+    get_pattern, get_pattern_by_mnemonic, get_pattern_by_mnemonic_and_args, Bytecode, BytecodeFile,
+    BytecodeFileHeader, ExpectedOperandType, InstructionPattern, OperandType,
 };
 use num_traits::cast::FromPrimitive;
 use std::collections::HashMap;
@@ -56,7 +57,7 @@ impl Assembler {
     }
 
     pub fn parse_register(reg: &str) -> Result<u32, AssemblerError> {
-        if !reg.starts_with('R') {
+        if !reg.to_uppercase().starts_with('R') {
             return Err(AssemblerError::InvalidRegister(reg.to_string()));
         }
         reg[1..]
@@ -67,11 +68,13 @@ impl Assembler {
     fn parse_operand(
         &self,
         operand: &str,
-        expected_type: OperandType,
+        expected_type: ExpectedOperandType,
     ) -> Result<ParsedOperand, AssemblerError> {
         match expected_type {
-            OperandType::Register => Ok(ParsedOperand::Register(Self::parse_register(operand)?)),
-            OperandType::ImmediateI32 => {
+            ExpectedOperandType::Register => {
+                Ok(ParsedOperand::Register(Self::parse_register(operand)?))
+            }
+            ExpectedOperandType::ImmediateI32 => {
                 let value = if operand.starts_with("0x") {
                     i32::from_str_radix(&operand[2..], 16)
                 } else {
@@ -80,13 +83,13 @@ impl Assembler {
                 .map_err(|_| AssemblerError::InvalidImmediate(operand.to_string()))?;
                 Ok(ParsedOperand::ImmediateI32(value))
             }
-            OperandType::ImmediateF32 => {
+            ExpectedOperandType::ImmediateF32 => {
                 let value = operand
                     .parse::<f32>()
                     .map_err(|_| AssemblerError::InvalidImmediate(operand.to_string()))?;
                 Ok(ParsedOperand::ImmediateF32(value))
             }
-            OperandType::MemoryAddress => {
+            ExpectedOperandType::MemoryAddress => {
                 let addr = if operand.starts_with('@') {
                     operand[1..]
                         .parse::<u32>()
@@ -96,7 +99,7 @@ impl Assembler {
                 };
                 Ok(ParsedOperand::Address(addr))
             }
-            OperandType::LabelOrAddress => {
+            ExpectedOperandType::LabelOrAddress => {
                 if !operand.starts_with('@') {
                     return Err(AssemblerError::InvalidLabel(operand.to_string()));
                 }
@@ -132,7 +135,8 @@ impl Assembler {
             operand_str.split(',').map(str::trim).collect()
         };
 
-        let pattern = get_pattern_by_mnemonic(mnemonic)
+        let pattern = self
+            .parse_line(line)
             .ok_or_else(|| AssemblerError::UnknownInstruction(mnemonic.to_string()))?;
 
         if operand_strs.len() != pattern.operands.len() {
@@ -166,6 +170,31 @@ impl Assembler {
         Ok(result)
     }
 
+    fn parse_line(&mut self, line: &str) -> Option<&'static InstructionPattern> {
+        let line = line.split(";").next().unwrap().trim();
+        if line.contains(" ") {
+            let (mnemonic, args) = line.split_once(" ").unwrap();
+            let args = args.split(",").map(|a| a.trim()).flat_map(|a| {
+                if a.to_uppercase().starts_with("R") {
+                    Some(OperandType::Register)
+                } else if a.starts_with("@") && a[1..].parse::<u32>().is_ok() {
+                    Some(OperandType::MemoryAddress)
+                } else if a.starts_with("@") && a[1..].is_ascii() {
+                    Some(OperandType::Label)
+                } else if a.parse::<u32>().is_ok() {
+                    Some(OperandType::ImmediateI32)
+                } else if a.parse::<f32>().is_ok() {
+                    Some(OperandType::ImmediateF32)
+                } else {
+                    None
+                }
+            });
+            get_pattern_by_mnemonic_and_args(mnemonic, &args.collect::<Vec<_>>())
+        } else {
+            get_pattern_by_mnemonic(line)
+        }
+    }
+
     pub fn assemble_program(&mut self, program: &str) -> Result<BytecodeFile, AssemblerError> {
         // First pass: collect labels
         for line in program.lines() {
@@ -174,10 +203,7 @@ impl Assembler {
                 let label = &line[..line.trim().len() - 1];
                 self.labels.insert(label.to_string(), self.current_address);
             } else if !line.is_empty() && !line.starts_with(";") {
-                if let Some((m, _)) = line.split_once(" ") {
-                    let p = get_pattern_by_mnemonic(m.trim()).unwrap();
-                    self.current_address += p.operands.len() as u32 + 1;
-                } else if let Some(p) = get_pattern_by_mnemonic(line) {
+                if let Some(p) = self.parse_line(line) {
                     self.current_address += p.operands.len() as u32 + 1;
                 }
             }
@@ -234,13 +260,13 @@ impl Disassembler {
         }
     }
 
-    fn format_operand(&self, value: u32, typ: OperandType) -> String {
+    fn format_operand(&self, value: u32, typ: ExpectedOperandType) -> String {
         match typ {
-            OperandType::Register => format!("R{}", value),
-            OperandType::ImmediateI32 => format!("{}", value as i32),
-            OperandType::ImmediateF32 => format!("{}", f32::from_bits(value)),
-            OperandType::MemoryAddress => format!("@{}", value),
-            OperandType::LabelOrAddress => {
+            ExpectedOperandType::Register => format!("R{}", value),
+            ExpectedOperandType::ImmediateI32 => format!("{}", value as i32),
+            ExpectedOperandType::ImmediateF32 => format!("{}", f32::from_bits(value)),
+            ExpectedOperandType::MemoryAddress => format!("@{}", value),
+            ExpectedOperandType::LabelOrAddress => {
                 if let Some(label) = self.labels.get(&value) {
                     format!("@{}", label)
                 } else {
@@ -315,8 +341,8 @@ mod tests {
         let mut assembler = Assembler::new();
         let program = "\
             start:\n\
-            loadi r0, 42\n\
-            addi r0, 10\n\
+            load r0, 42\n\
+            add r0, 10\n\
             jmp @start\
         ";
         let result = assembler.assemble_program(program).unwrap();
@@ -336,8 +362,8 @@ mod tests {
         ];
         let disassembler = Disassembler::new();
         let result = disassembler.disassemble_program(&bytecode).unwrap();
-        assert!(result.contains("loadi r0, 42"));
-        assert!(result.contains("addi r0, 10"));
+        assert!(result.to_lowercase().contains("load r0, 42"));
+        assert!(result.to_lowercase().contains("add r0, 10"));
     }
 
     #[test]
@@ -347,18 +373,18 @@ mod tests {
         let bytecode = assembler.assemble_program(program).unwrap();
         let disassembler = Disassembler::from_bytecode_file(&bytecode);
         let result = disassembler.disassemble_program(&bytecode.data).unwrap();
-        assert!(result.contains("load r0, @1234"));
-        assert!(result.contains("store @1234, r0"));
+        assert!(result.to_lowercase().contains("load r0, @1234"));
+        assert!(result.to_lowercase().contains("store @1234, r0"));
     }
 
     #[test]
     fn test_roundtrip() {
-        let program = "start:\nloadi r0, 42\naddi r0, 10\njmp @start\n";
+        let program = "start:\nload r0, 42\nadd r0, 10\njmp @start\n";
         let mut assembler = Assembler::new();
         let bytecode = assembler.assemble_program(program).unwrap();
         let disassembler = Disassembler::from_bytecode_file(&bytecode);
         let result = disassembler.disassemble_program(&bytecode.data).unwrap();
-        let expected = "start:\n    loadi r0, 42\n    addi r0, 10\n    jmp @start\n";
-        assert_eq!(result, expected);
+        let expected = "start:\n    load r0, 42\n    add r0, 10\n    jmp @start\n";
+        assert_eq!(result.to_uppercase(), expected.to_uppercase());
     }
 }
