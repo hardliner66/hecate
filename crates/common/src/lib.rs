@@ -126,6 +126,9 @@ impl From<Vec<u32>> for BytecodeFile {
 )]
 #[repr(u32)]
 pub enum Bytecode {
+    //
+    // 0x00 - 0x0F: Memory & Stack
+    //
     Nop = 0x00,
     LoadValue = 0x01,
     LoadMemory = 0x02,
@@ -135,33 +138,62 @@ pub enum Bytecode {
     PushReg = 0x06,
     Pop = 0x07,
 
+    //
+    // 0x10 - 0x2F: Arithmetic
+    //
     Add = 0x11,
     AddValue = 0x12,
     FAdd = 0x13,
     FAddValue = 0x14,
+
     Sub = 0x15,
     SubValue = 0x16,
     FSub = 0x17,
     FSubValue = 0x18,
+
     Mul = 0x19,
-    MulValue = 0x1a,
-    FMul = 0x1b,
-    FMulValue = 0x1c,
-    Div = 0x1d,
-    DivValue = 0x1e,
-    FDiv = 0x1f,
+    MulValue = 0x1A,
+    FMul = 0x1B,
+    FMulValue = 0x1C,
+
+    Div = 0x1D,
+    DivValue = 0x1E,
+    FDiv = 0x1F,
     FDivValue = 0x20,
 
+    //
+    // 0x70 - 0x7F: Bitwise / Logical
+    //
+    And = 0x71,
+    AndValue = 0x72,
+    Or = 0x73,
+    OrValue = 0x74,
+    Xor = 0x75,
+    XorValue = 0x76,
+    Not = 0x77,
+
+    //
+    // 0xB0 - 0xBF: Byte-level memory
+    //
     LoadByte = 0xB0,
     StoreByte = 0xB1,
 
-    Cmp = 0xC00,
-    CmpValue = 0xC01,
-    FCmp = 0xC02,
-    FCmpValue = 0xC03,
-    Jmp = 0xC04,
+    //
+    // 0xC00: Unconditional jump
+    //
+    Jmp = 0xC00,
 
-    // Signed conditions
+    //
+    // 0xC01 - 0xC04: Comparisons
+    //
+    Cmp = 0xC01,
+    CmpValue = 0xC02,
+    FCmp = 0xC03,
+    FCmpValue = 0xC04,
+
+    //
+    // 0xC05 - 0xC0A: Signed conditions
+    //
     Je = 0xC05,  // Jump Equal/Zero (ZF=1)
     Jne = 0xC06, // Jump Not Equal/Not Zero (ZF=0)
     Jg = 0xC07,  // Jump Greater (ZF=0 and SF=OF)
@@ -169,27 +201,44 @@ pub enum Bytecode {
     Jl = 0xC09,  // Jump Less (SF!=OF)
     Jle = 0xC0A, // Jump Less or Equal (ZF=1 or SF!=OF)
 
-    // Unsigned conditions
+    //
+    // 0xC0B - 0xC0E: Unsigned conditions
+    //
     Ja = 0xC0B,  // Jump Above (CF=0 and ZF=0)
     Jae = 0xC0C, // Jump Above or Equal (CF=0)
     Jb = 0xC0D,  // Jump Below (CF=1)
     Jbe = 0xC0E, // Jump Below or Equal (CF=1 or ZF=1)
 
-    // Other flag conditions
+    //
+    // 0xC0F - 0xC14: Other flag conditions
+    //
     Jc = 0xC0F,  // Jump If Carry (CF=1)
     Jnc = 0xC10, // Jump If No Carry (CF=0)
     Jo = 0xC11,  // Jump If Overflow (OF=1)
     Jno = 0xC12, // Jump If No Overflow (OF=0)
-    Js = 0xC13,  // Jump Sign (SF=1)
-    Jns = 0xC14, // Jump No Sign (SF=0)
+    Js = 0xC13,  // Jump If Sign (SF=1)
+    Jns = 0xC14, // Jump If No Sign (SF=0)
 
-    // Special conditions
-    Jxcz = 0xCFF, // Jump if CX is Zero (does not check flags, checks a register)
+    //
+    // 0xCFF: Special condition
+    //
+    Jxcz = 0xCFF, // Jump if CX is Zero (checks register CX directly)
 
+    //
+    // 0xF0 - 0xF2: Call / Return / Syscall
+    //
     Call = 0xF0,
     Ret = 0xF1,
     Syscall = 0xF2,
+
+    //
+    // 0xFFFFFFF0: Debug
+    //
     Inspect = 0xFFFFFFF0,
+
+    //
+    // 0xFFFFFFFF: Termination
+    //
     Halt = 0xFFFFFFFF,
 }
 
@@ -263,6 +312,14 @@ pub static INSTRUCTION_PATTERNS: Lazy<HashMap<Bytecode, &'static InstructionPatt
             InstructionPattern::new(Bytecode::FMulValue, &[Register, ImmediateF32], "fmul"),
             InstructionPattern::new(Bytecode::FDiv, &[Register, Register], "fdiv"),
             InstructionPattern::new(Bytecode::FDivValue, &[Register, ImmediateF32], "fdiv"),
+            // Logical / Bitwise
+            InstructionPattern::new(Bytecode::And, &[Register, Register], "and"),
+            InstructionPattern::new(Bytecode::AndValue, &[Register, ImmediateI32], "and"),
+            InstructionPattern::new(Bytecode::Or, &[Register, Register], "or"),
+            InstructionPattern::new(Bytecode::OrValue, &[Register, ImmediateI32], "or"),
+            InstructionPattern::new(Bytecode::Xor, &[Register, Register], "xor"),
+            InstructionPattern::new(Bytecode::XorValue, &[Register, ImmediateI32], "xor"),
+            InstructionPattern::new(Bytecode::Not, &[Register], "not"),
             // Memory operations
             InstructionPattern::new(Bytecode::LoadByte, &[Register, MemoryAddress], "loadbyte"),
             InstructionPattern::new(Bytecode::StoreByte, &[MemoryAddress, Register], "storebyte"),
@@ -331,6 +388,7 @@ pub fn get_pattern_by_mnemonic_and_args(
                     .all(|(a, b)| match (a, b) {
                         (ExpectedOperandType::Register, OperandType::Register) => true,
                         (ExpectedOperandType::ImmediateI32, OperandType::ImmediateI32) => true,
+                        (ExpectedOperandType::ImmediateF32, OperandType::ImmediateI32) => true,
                         (ExpectedOperandType::ImmediateF32, OperandType::ImmediateF32) => true,
                         (ExpectedOperandType::MemoryAddress, OperandType::MemoryAddress) => true,
                         (ExpectedOperandType::LabelOrAddress, OperandType::MemoryAddress) => true,

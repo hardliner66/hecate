@@ -1,15 +1,66 @@
-main:
-    load R2, 5
-    load R0, R2
-    call @loop
-    store @1000, R0
-    inspect @1000
+    nop
+    load R0, 42
+    load R1, @100
+    load R2, R0
+    store @101, R2
+    push 123
+    push R1
+    pop R3
+    add R0, R3
+    add R3, 7
+    sub R3, R2
+    sub R2, 10
+    mul R0, R3
+    mul R3, 2
+    div R0, R2
+    div R2, 2
+    fadd R4, R5
+    fadd R4, 3.14
+    fsub R5, R6
+    fsub R5, 1
+    fmul R4, R5
+    fmul R4, 2
+    fdiv R5, R4
+    fdiv R5, 2
+    and R0, R1
+    and R0, 255
+    or R1, R2
+    or R1, 255
+    xor R0, R3
+    xor R0, 4660
+    not R0
+    loadbyte R6, @202
+    storebyte @203, R6
+    cmp R0, R1
+    cmp R0, 42
+    fcmp R4, R5
+    fcmp R4, 1.25
+    jmp @label_unconditional
+label_compare:
+    je @label_sign
+    jne @label_sign
+    jg @label_sign
+    jge @label_sign
+    jl @label_sign
+    jle @label_sign
+    ja @label_sign
+    jae @label_sign
+    jb @label_sign
+    jbe @label_sign
+    jc @label_sign
+    jnc @label_sign
+    jo @label_sign
+    jno @label_sign
+    js @label_sign
+    jns @label_sign
+    jxcz @label_sign
+label_unconditional:
+    call @subroutine
+    syscall
+    inspect @200
     halt
-loop:
-    cmp R2, 1
-    jle @end
-    sub R2, 1
-    mul R0, R2
-    jmp @loop
-end:
+subroutine:
+    load R7, 999
+    ret
+label_sign:
     ret

@@ -21,7 +21,7 @@
             },
             "args": [
                 "run-asm",
-                "./demo.hasm"
+                "./all.hasm"
             ],
             "cwd": "${workspaceFolder}"
         },

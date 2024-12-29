@@ -77,6 +77,8 @@ impl Assembler {
             ExpectedOperandType::ImmediateI32 => {
                 let value = if operand.starts_with("0x") {
                     i32::from_str_radix(&operand[2..], 16)
+                } else if operand.starts_with("b") {
+                    i32::from_str_radix(&operand[2..], 2)
                 } else {
                     operand.parse::<i32>()
                 }
@@ -174,22 +176,35 @@ impl Assembler {
         let line = line.split(";").next().unwrap().trim();
         if line.contains(" ") {
             let (mnemonic, args) = line.split_once(" ").unwrap();
-            let args = args.split(",").map(|a| a.trim()).flat_map(|a| {
-                if a.to_uppercase().starts_with("R") {
-                    Some(OperandType::Register)
-                } else if a.starts_with("@") && a[1..].parse::<u32>().is_ok() {
-                    Some(OperandType::MemoryAddress)
-                } else if a.starts_with("@") && a[1..].is_ascii() {
-                    Some(OperandType::Label)
-                } else if a.parse::<u32>().is_ok() {
-                    Some(OperandType::ImmediateI32)
-                } else if a.parse::<f32>().is_ok() {
-                    Some(OperandType::ImmediateF32)
-                } else {
-                    None
-                }
-            });
-            get_pattern_by_mnemonic_and_args(mnemonic, &args.collect::<Vec<_>>())
+            let args = args
+                .split(",")
+                .map(|a| a.trim())
+                .map(|a| {
+                    if a.to_uppercase().starts_with("R") {
+                        Ok(OperandType::Register)
+                    } else if a.starts_with("@") && a[1..].parse::<u32>().is_ok() {
+                        Ok(OperandType::MemoryAddress)
+                    } else if a.starts_with("@") && a[1..].is_ascii() {
+                        Ok(OperandType::Label)
+                    } else if (if a.starts_with("0x") {
+                        i32::from_str_radix(&a[2..], 16)
+                    } else if a.starts_with("b") {
+                        i32::from_str_radix(&a[2..], 2)
+                    } else {
+                        a.parse::<i32>()
+                    })
+                    .is_ok()
+                    {
+                        Ok(OperandType::ImmediateI32)
+                    } else if a.parse::<f32>().is_ok() {
+                        Ok(OperandType::ImmediateF32)
+                    } else {
+                        Err("Invalid operand!")
+                    }
+                })
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            get_pattern_by_mnemonic_and_args(mnemonic, &args)
         } else {
             get_pattern_by_mnemonic(line)
         }
@@ -199,13 +214,14 @@ impl Assembler {
         // First pass: collect labels
         for line in program.lines() {
             let line = line.trim();
+            if line.is_empty() && line.starts_with(";") {
+                continue;
+            }
             if line.ends_with(':') {
                 let label = &line[..line.trim().len() - 1];
                 self.labels.insert(label.to_string(), self.current_address);
-            } else if !line.is_empty() && !line.starts_with(";") {
-                if let Some(p) = self.parse_line(line) {
-                    self.current_address += p.operands.len() as u32 + 1;
-                }
+            } else if let Some(p) = self.parse_line(line) {
+                self.current_address += p.operands.len() as u32 + 1;
             }
         }
 

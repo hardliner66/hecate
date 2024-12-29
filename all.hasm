@@ -1,0 +1,116 @@
+; --- A Sample Program Demonstrating All Mnemonics ---
+
+        ; 0x00-0x0F: Memory & Stack
+        nop                         ; do nothing
+
+        load R0, 42                 ; loadValue: R0 <- 42 (immediate)
+        load R1, @100              ; loadMemory: R1 <- memory[100]
+        load R2, R0                 ; loadReg: R2 <- R0
+        store @101, R2             ; store: memory[101] <- R2
+        push 123                    ; pushValue: push immediate 123 on stack
+        push R1                     ; pushReg: push contents of R1 on stack
+        pop R3                      ; pop: pop top of stack -> R3
+
+; --- 0x10-0x2F: Arithmetic (Integer + Float) ---
+
+        ; Integer arithmetic
+        add R0, R3                  ; add: R0 = R0 + R3
+        add R3, 7                   ; addValue: R3 = R3 + 7
+        sub R3, R2                  ; sub: R3 = R3 - R2
+        sub R2, 10                  ; subValue: R2 = R2 - 10
+        mul R0, R3                  ; mul: R0 = R0 * R3  (32-bit wrap)
+        mul R3, 2                   ; mulValue: R3 = R3 * 2
+        div R0, R2                  ; div: R0 = R0 / R2  (integer division)
+        div R2, 2                   ; divValue: R2 = R2 / 2
+
+        ; Floating-point arithmetic
+        fadd R4, R5                 ; fadd: R4 = float(R4) + float(R5)
+        fadd R4, 3.14               ; faddValue: R4 = float(R4) + 3.14
+        fsub R5, R6                 ; fsub: R5 = float(R5) - float(R6)
+        fsub R5, 1.0                ; fsubValue: R5 = float(R5) - 1.0
+        fmul R4, R5                 ; fmul: R4 = float(R4) * float(R5)
+        fmul R4, 2.0                ; fmulValue: R4 = float(R4) * 2.0
+        fdiv R5, R4                 ; fdiv: R5 = float(R5) / float(R4)
+        fdiv R5, 2.0                ; fdivValue: R5 = float(R5) / 2.0
+
+; --- 0x70-0x7F: Bitwise / Logical ---
+
+        and R0, R1                  ; R0 = R0 & R1
+        and R0, 0xFF                ; R0 = R0 & 0xFF
+        or R1, R2                   ; R1 = R1 | R2
+        or R1, 0x00FF               ; R1 = R1 | 0x00FF
+        xor R0, R3                  ; R0 = R0 ^ R3
+        xor R0, 0x1234              ; R0 = R0 ^ 0x1234
+        not R0                      ; R0 = ~R0
+
+; --- 0xB0-0xBF: Byte-level memory ---
+
+        loadbyte R6, @202          ; R6 = memory[202*4] as u8
+        storebyte @203, R6         ; memory[203*4] = (R6 & 0xFF)
+
+; --- 0xC00 - Comparisons & Conditional Jumps ---
+
+        cmp R0, R1                  ; set flags based on (R0 - R1)
+        cmp R0, 42                  ; set flags based on (R0 - 42)
+        fcmp R4, R5                 ; set float flags based on (R4 - R5)
+        fcmp R4, 1.25               ; set float flags based on (R4 - 1.25)
+
+        jmp  @label_unconditional    ; Unconditional jump
+
+; Signed conditions
+label_compare:
+        je   @label_equal            ; Jump if equal
+        jne  @label_notequal         ; Jump if not equal
+        jg   @label_greater          ; Jump if greater
+        jge  @label_greaterorequal   ; Jump if greater or equal
+        jl   @label_less             ; Jump if less
+        jle  @label_lessorequal      ; Jump if less or equal
+
+; Unsigned conditions
+        ja   @label_above            ; Jump if above (CF=0 & ZF=0)
+        jae  @label_aboveorequal     ; Jump if above or equal (CF=0)
+        jb   @label_below            ; Jump if below (CF=1)
+        jbe  @label_beloworequal     ; Jump if below or equal (CF=1 or ZF=1)
+
+; Other flag conditions
+        jc   @label_carry            ; Jump if carry = 1
+        jnc  @label_nocarry          ; Jump if carry = 0
+        jo   @label_overflow         ; Jump if overflow = 1
+        jno  @label_nooverflow       ; Jump if overflow = 0
+        js   @label_sign             ; Jump if sign = 1
+        jns  @label_nosign           ; Jump if sign = 0
+        jxcz @label_regcxzero        ; Jump if CX register is zero (example)
+
+; --- 0xF0 - 0xF2: Call / Return / Syscall ---
+label_unconditional:
+        call @subroutine             ; push IP+1, jump to 'subroutine'
+        syscall                     ; invoke host IO (R0 often holds syscall code)
+        inspect @200               ; debugging: print memory[200]
+        halt
+
+; A small subroutine:
+subroutine:
+        ; do something minimal
+        load R7, 999                ; loadValue: R7 <- 999
+        ret
+
+; --- All condition labels (mostly empty for this demo) ---
+label_equal:
+label_notequal:
+label_greater:
+label_greaterorequal:
+label_less:
+label_lessorequal:
+label_above:
+label_aboveorequal:
+label_below:
+label_beloworequal:
+label_carry:
+label_nocarry:
+label_overflow:
+label_nooverflow:
+label_sign:
+label_nosign:
+label_regcxzero:
+        ; return to wherever jumped from
+        ret

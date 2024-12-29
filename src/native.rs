@@ -393,6 +393,90 @@ impl<IO: HostIO> NativeCpu<IO> {
         Ok(())
     }
 
+    /// Update flags after an AND operation.
+    ///
+    /// Typical behavior:
+    /// - ZERO = (result == 0)
+    /// - SIGN = (result's most significant bit set)
+    /// - CARRY = false
+    /// - OVERFLOW = false
+    fn update_flags_and(&mut self, a: u32, b: u32, result: u32) {
+        self.flags.zero = result == 0;
+        self.flags.sign = (result as i32) < 0;
+        self.flags.carry = false;
+        self.flags.overflow = false;
+
+        if self.verbose {
+            println!(
+                "FLAGS (AND): a=0x{:08X}, b=0x{:08X}, result=0x{:08X}, zero={}, sign={}, carry={}, overflow={}",
+                a, b, result, self.flags.zero, self.flags.sign, self.flags.carry, self.flags.overflow
+            );
+        }
+    }
+
+    /// Update flags after an OR operation.
+    ///
+    /// Typical behavior:
+    /// - ZERO = (result == 0)
+    /// - SIGN = (result's most significant bit set)
+    /// - CARRY = false
+    /// - OVERFLOW = false
+    fn update_flags_or(&mut self, a: u32, b: u32, result: u32) {
+        self.flags.zero = result == 0;
+        self.flags.sign = (result as i32) < 0;
+        self.flags.carry = false;
+        self.flags.overflow = false;
+
+        if self.verbose {
+            println!(
+                "FLAGS (OR): a=0x{:08X}, b=0x{:08X}, result=0x{:08X}, zero={}, sign={}, carry={}, overflow={}",
+                a, b, result, self.flags.zero, self.flags.sign, self.flags.carry, self.flags.overflow
+            );
+        }
+    }
+
+    /// Update flags after an XOR operation.
+    ///
+    /// Typical behavior:
+    /// - ZERO = (result == 0)
+    /// - SIGN = (result's most significant bit set)
+    /// - CARRY = false
+    /// - OVERFLOW = false
+    fn update_flags_xor(&mut self, a: u32, b: u32, result: u32) {
+        self.flags.zero = result == 0;
+        self.flags.sign = (result as i32) < 0;
+        self.flags.carry = false;
+        self.flags.overflow = false;
+
+        if self.verbose {
+            println!(
+                "FLAGS (XOR): a=0x{:08X}, b=0x{:08X}, result=0x{:08X}, zero={}, sign={}, carry={}, overflow={}",
+                a, b, result, self.flags.zero, self.flags.sign, self.flags.carry, self.flags.overflow
+            );
+        }
+    }
+
+    /// Update flags after a NOT operation.
+    ///
+    /// Typical behavior:
+    /// - ZERO = (result == 0)
+    /// - SIGN = (result's most significant bit set)
+    /// - CARRY = false
+    /// - OVERFLOW = false
+    fn update_flags_not(&mut self, a: u32, result: u32) {
+        self.flags.zero = result == 0;
+        self.flags.sign = (result as i32) < 0;
+        self.flags.carry = false;
+        self.flags.overflow = false;
+
+        if self.verbose {
+            println!(
+                "FLAGS (NOT): a=0x{:08X}, result=0x{:08X}, zero={}, sign={}, carry={}, overflow={}",
+                a, result, self.flags.zero, self.flags.sign, self.flags.carry, self.flags.overflow
+            );
+        }
+    }
+
     fn update_flags_mul(&mut self, _a: u32, _b: u32, result: u64) {
         // The final value is the lower 32 bits
         let low_result = result as u32;
@@ -651,6 +735,135 @@ impl<IO: HostIO> NativeCpu<IO> {
                     }
 
                     self.registers[reg as usize] = self.pop_stack()?;
+                    self.stats.cycles += 1;
+                }
+                Bytecode::And => {
+                    let reg1 = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let reg2 = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let a = self.registers[reg1 as usize];
+                    let b = self.registers[reg2 as usize];
+                    let result = a & b;
+
+                    if self.verbose {
+                        println!("AND R{}({}), R{}({}) => {}", reg1, a, reg2, b, result);
+                    }
+
+                    self.registers[reg1 as usize] = result;
+                    self.update_flags_and(a, b, result);
+                    self.stats.cycles += 1;
+                }
+                Bytecode::AndValue => {
+                    let reg = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let imm = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let a = self.registers[reg as usize];
+                    let b = imm;
+                    let result = a & b;
+
+                    if self.verbose {
+                        println!("AND R{}({}), {} => {}", reg, a, b, result);
+                    }
+
+                    self.registers[reg as usize] = result;
+                    self.update_flags_and(a, b, result);
+                    self.stats.cycles += 1;
+                }
+                Bytecode::Or => {
+                    let reg1 = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let reg2 = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let a = self.registers[reg1 as usize];
+                    let b = self.registers[reg2 as usize];
+                    let result = a | b;
+
+                    if self.verbose {
+                        println!("OR R{}({}), R{}({}) => {}", reg1, a, reg2, b, result);
+                    }
+
+                    self.registers[reg1 as usize] = result;
+                    self.update_flags_or(a, b, result);
+                    self.stats.cycles += 1;
+                }
+                Bytecode::OrValue => {
+                    let reg = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let imm = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let a = self.registers[reg as usize];
+                    let b = imm;
+                    let result = a | b;
+
+                    if self.verbose {
+                        println!("OR R{}({}), {} => {}", reg, a, b, result);
+                    }
+
+                    self.registers[reg as usize] = result;
+                    self.update_flags_or(a, b, result);
+                    self.stats.cycles += 1;
+                }
+                Bytecode::Xor => {
+                    let reg1 = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let reg2 = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let a = self.registers[reg1 as usize];
+                    let b = self.registers[reg2 as usize];
+                    let result = a ^ b;
+
+                    if self.verbose {
+                        println!("XOR R{}({}), R{}({}) => {}", reg1, a, reg2, b, result);
+                    }
+
+                    self.registers[reg1 as usize] = result;
+                    self.update_flags_xor(a, b, result);
+                    self.stats.cycles += 1;
+                }
+                Bytecode::XorValue => {
+                    let reg = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let imm = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let a = self.registers[reg as usize];
+                    let b = imm;
+                    let result = a ^ b;
+
+                    if self.verbose {
+                        println!("XOR R{}({}), {} => {}", reg, a, b, result);
+                    }
+
+                    self.registers[reg as usize] = result;
+                    self.update_flags_xor(a, b, result);
+                    self.stats.cycles += 1;
+                }
+                Bytecode::Not => {
+                    let reg1 = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let a = self.registers[reg1 as usize];
+                    let result = !a;
+
+                    if self.verbose {
+                        println!("NOT R{}({}) => {}", reg1, a, result);
+                    }
+
+                    self.registers[reg1 as usize] = result;
+                    self.update_flags_not(a, result);
                     self.stats.cycles += 1;
                 }
                 Bytecode::Add => {
