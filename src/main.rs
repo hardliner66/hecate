@@ -24,7 +24,7 @@ fn run(memory: &[u32], verbose: bool) -> anyhow::Result<()> {
     let mut cpu = NativeCpu::new(1024 * 1024, 16, NullHostIO);
     cpu.set_verbose(verbose);
 
-    cpu.load_memory(0, memory);
+    cpu.load_protected_memory(0, memory);
 
     let stats = cpu.execute(RunMode::Run)?;
 

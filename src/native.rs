@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use hecate_common::{Bytecode, CpuStats, CpuTrait, ExecutionError, RunMode};
 use num_traits::FromPrimitive;
 
@@ -129,6 +131,8 @@ pub struct NativeCpu<IO: HostIO> {
     l2: Cache,
     l3: Cache,
 
+    protected_memory: Range<u32>,
+
     last_load_addresses: Vec<u32>,
     stable_stride: Option<i32>,
     host_io: Option<IO>,
@@ -139,6 +143,16 @@ impl<IO: HostIO> CpuTrait for NativeCpu<IO> {
 
     fn set_verbose(&mut self, verbose: bool) {
         self.verbose = verbose;
+    }
+
+    fn protect(&mut self, range: Range<Self::Size>) {
+        self.protected_memory = range;
+    }
+
+    fn load_protected_memory(&mut self, address: Self::Size, memory: &[Self::Size]) {
+        let len = self.memory.len().min(memory.len());
+        self.memory[address as usize..address as usize + len].copy_from_slice(&memory[..len]);
+        self.protect(address..address + memory.len() as u32);
     }
 
     fn load_memory(&mut self, address: Self::Size, memory: &[Self::Size]) {
@@ -177,6 +191,8 @@ impl<IO: HostIO> NativeCpu<IO> {
             l1d: Cache::new(L1_SETS, L1_WAYS, LINE_SIZE, L1_LATENCY),
             l2: Cache::new(L2_SETS, L2_WAYS, LINE_SIZE, L2_LATENCY),
             l3: Cache::new(L3_SETS, L3_WAYS, LINE_SIZE, L3_LATENCY),
+
+            protected_memory: 0..0,
 
             last_load_addresses: Vec::new(),
             stable_stride: None,
@@ -384,6 +400,9 @@ impl<IO: HostIO> NativeCpu<IO> {
 
     fn write_memory(&mut self, address: u32, value: u32) -> Result<(), ExecutionError> {
         self.valid_address(address)?;
+        if self.protected_memory.contains(&address) {
+            return Err(ExecutionError::WriteProtectedMemory(address));
+        }
         if self.verbose {
             print!("WRITE @{:#02x}, {}", address, value);
         }

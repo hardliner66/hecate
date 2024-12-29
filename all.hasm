@@ -6,7 +6,7 @@
         load R0, 42                 ; loadValue: R0 <- 42 (immediate)
         load R1, @100              ; loadMemory: R1 <- memory[100]
         load R2, R0                 ; loadReg: R2 <- R0
-        store @101, R2             ; store: memory[101] <- R2
+        store @1001, R2             ; store: memory[101] <- R2
         push 123                    ; pushValue: push immediate 123 on stack
         push R1                     ; pushReg: push contents of R1 on stack
         pop R3                      ; pop: pop top of stack -> R3
@@ -45,8 +45,8 @@
 
 ; --- 0xB0-0xBF: Byte-level memory ---
 
-        loadbyte R6, @202          ; R6 = memory[202*4] as u8
-        storebyte @203, R6         ; memory[203*4] = (R6 & 0xFF)
+        loadbyte R6, @2002          ; R6 = memory[202*4] as u8
+        storebyte @2003, R6         ; memory[203*4] = (R6 & 0xFF)
 
 ; --- 0xC00 - Comparisons & Conditional Jumps ---
 

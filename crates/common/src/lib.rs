@@ -3,6 +3,7 @@ use std::{
     error::Error,
     fs::File,
     io::{BufReader, BufWriter},
+    ops::Range,
     path::Path,
 };
 
@@ -19,6 +20,8 @@ pub enum ExecutionError {
     NotImplemented,
     #[error("Trying to access invalid memory location (@{:#02x}/@{})", .0, .0)]
     InvalidMemoryLocation(u32),
+    #[error("Trying to write into protected memory (@{:#02x}/@{})", .0, .0)]
+    WriteProtectedMemory(u32),
     #[error("Stack Overflow")]
     StackOverflow,
     #[error("Stack Underflow")]
@@ -51,6 +54,9 @@ pub trait CpuTrait {
     fn set_verbose(&mut self, verbose: bool);
 
     fn load_memory(&mut self, address: Self::Size, memory: &[Self::Size]);
+    fn load_protected_memory(&mut self, address: Self::Size, memory: &[Self::Size]);
+
+    fn protect(&mut self, range: Range<Self::Size>);
 
     fn execute(&mut self, run_mode: RunMode) -> Result<CpuStats, ExecutionError>;
 
@@ -366,14 +372,7 @@ pub fn get_pattern(bytecode: Bytecode) -> Option<&'static InstructionPattern> {
     INSTRUCTION_PATTERNS.get(&bytecode).copied()
 }
 
-pub fn get_pattern_by_mnemonic(mnemonic: &str) -> Option<&'static InstructionPattern> {
-    INSTRUCTION_PATTERNS
-        .values()
-        .find(|pattern| pattern.mnemonic == mnemonic)
-        .copied()
-}
-
-pub fn get_pattern_by_mnemonic_and_args(
+pub fn get_pattern_by_mnemonic(
     mnemonic: &str,
     args: &[OperandType],
 ) -> Option<&'static InstructionPattern> {
@@ -381,6 +380,7 @@ pub fn get_pattern_by_mnemonic_and_args(
         .values()
         .find(|pattern| {
             pattern.mnemonic == mnemonic
+                && pattern.operands.len() == args.len()
                 && pattern
                     .operands
                     .iter()
@@ -424,7 +424,9 @@ mod tests {
 
     #[test]
     fn test_mnemonic_lookup() {
-        let pattern = get_pattern_by_mnemonic("add").unwrap();
+        let pattern =
+            get_pattern_by_mnemonic("add", &[OperandType::Register, OperandType::Register])
+                .unwrap();
         assert_eq!(pattern.bytecode, Bytecode::Add);
         assert_eq!(pattern.operands.len(), 2);
     }
