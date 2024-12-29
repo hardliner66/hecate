@@ -1,6 +1,6 @@
 use hecate_common::{
-    get_pattern, get_pattern_by_mnemonic, get_pattern_by_mnemonic_and_args, Bytecode, BytecodeFile,
-    BytecodeFileHeader, ExpectedOperandType, InstructionPattern, OperandType,
+    get_pattern, get_pattern_by_mnemonic, Bytecode, BytecodeFile, BytecodeFileHeader,
+    ExpectedOperandType, InstructionPattern, OperandType,
 };
 use num_traits::cast::FromPrimitive;
 use std::collections::HashMap;
@@ -204,9 +204,9 @@ impl Assembler {
                 })
                 .collect::<Result<Vec<_>, _>>()
                 .unwrap();
-            get_pattern_by_mnemonic_and_args(mnemonic, &args)
+            get_pattern_by_mnemonic(mnemonic, &args)
         } else {
-            get_pattern_by_mnemonic(line)
+            get_pattern_by_mnemonic(line, &[])
         }
     }
 
