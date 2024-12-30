@@ -105,9 +105,10 @@ This might be changed later, but for now this should be enough.
 | 0x02       | LoadMemory | Load value from memory into a register                                                             | 1                            |
 | 0x03       | LoadReg    | Load value from one register into another register                                                 | 1                            |
 | 0x04       | Store      | Store a register's value into memory                                                               | 1                            |
-| 0x05       | PushValue  | Push immediate value onto the stack                                                                | 1                            |
-| 0x06       | PushReg    | Push register value onto the stack                                                                 | 1                            |
-| 0x07       | Pop        | Pop a value from the stack into a register                                                         | 1                            |
+| 0x05       | StoreValue | Store an immediate value into memory                                                               | 1                            |
+| 0x06       | PushValue  | Push immediate value onto the stack                                                                | 1                            |
+| 0x07       | PushReg    | Push register value onto the stack                                                                 | 1                            |
+| 0x08       | Pop        | Pop a value from the stack into a register                                                         | 1                            |
 | 0x11       | Add        | Add two register values                                                                            | 1                            |
 | 0x12       | AddValue   | Add an immediate value to a register                                                               | 1                            |
 | 0x13       | FAdd       | Add two floating-point register values                                                             | 2                            |
@@ -124,13 +125,20 @@ This might be changed later, but for now this should be enough.
 | 0x1E       | DivValue   | Divide a register value by an immediate value                                                      | 27                           |
 | 0x1F       | FDiv       | Divide one floating-point register value by another                                                | 27                           |
 | 0x20       | FDivValue  | Divide a register's floating-point value by an immediate value                                     | 27                           |
+| 0x70       | And        | Binary AND two registers                                                                           | 1                            |
+| 0x71       | AndValue   | Binary AND a register and an immediate value                                                       | 1                            |
+| 0x72       | Or         | Binary OR two registers                                                                            | 1                            |
+| 0x73       | OrValue    | Binary OR a register and an immediate value                                                        | 1                            |
+| 0x74       | Xor        | Binary XOR two registers                                                                           | 1                            |
+| 0x75       | XorValue   | Binary XOR a register and an immediate value                                                       | 1                            |
+| 0x76       | Not        | Binary NOT a register                                                                              | 1                            |
 | 0xB0       | LoadByte   | Load a byte from memory into a register                                                            | 2                            |
 | 0xB1       | StoreByte  | Store the least significant byte of a register into memory                                         | 2                            |
-| 0xC00      | Cmp        | Compare two register values                                                                        | 1                            |
-| 0xC01      | CmpValue   | Compare a register value with an immediate value                                                   | 1                            |
-| 0xC02      | FCmp       | Compare two floating-point register values                                                         | 2                            |
-| 0xC03      | FCmpValue  | Compare a register's floating-point value with an immediate value                                  | 2                            |
-| 0xC04      | Jmp        | Unconditional jump to a specific address                                                           | 1                            |
+| 0xC00      | Jmp        | Unconditional jump to a specific address                                                           | 1                            |
+| 0xC01      | Cmp        | Compare two register values                                                                        | 1                            |
+| 0xC02      | CmpValue   | Compare a register value with an immediate value                                                   | 1                            |
+| 0xC03      | FCmp       | Compare two floating-point register values                                                         | 2                            |
+| 0xC04      | FCmpValue  | Compare a register's floating-point value with an immediate value                                  | 2                            |
 | 0xC05      | Je         | Jump if equal (Zero Flag is set)                                                                   | 2                            |
 | 0xC06      | Jne        | Jump if not equal (Zero Flag is not set)                                                           | 2                            |
 | 0xC07      | Jg         | Jump if greater (Zero Flag not set and Sign Flag equals Overflow Flag)                             | 2                            |
@@ -147,8 +155,6 @@ This might be changed later, but for now this should be enough.
 | 0xC12      | Jno        | Jump if no overflow (Overflow Flag is not set)                                                     | 2                            |
 | 0xC13      | Js         | Jump if sign (Sign Flag is set)                                                                    | 2                            |
 | 0xC14      | Jns        | Jump if no sign (Sign Flag is not set)                                                             | 2                            |
-| 0xC15      | Jp         | Jump if parity (Parity Flag is set)                                                                | 2                            |
-| 0xC16      | Jnp        | Jump if no parity (Parity Flag is not set)                                                         | 2                            |
 | 0xCFF      | Jxcz       | Jump if CX register is zero (ignores flags)                                                        | 2                            |
 | 0xF0       | Call       | Call a function by pushing return address and jumping                                              | 25                           |
 | 0xF1       | Ret        | Return from a function by popping the return address                                               | 5                            |

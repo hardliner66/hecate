@@ -33,6 +33,8 @@ pub enum ExecutionError {
     InvalidOpcode(u32, u32),
     #[error("Host IO not available")]
     NoHostIO,
+    #[error("Invalid Syscall: {0}")]
+    InvalidSyscall(u32),
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -144,9 +146,10 @@ pub enum Bytecode {
     LoadMemory = 0x02,
     LoadReg = 0x03,
     Store = 0x04,
-    PushValue = 0x05,
-    PushReg = 0x06,
-    Pop = 0x07,
+    StoreValue = 0x05,
+    PushValue = 0x06,
+    PushReg = 0x07,
+    Pop = 0x08,
 
     //
     // 0x10 - 0x2F: Arithmetic
@@ -174,13 +177,13 @@ pub enum Bytecode {
     //
     // 0x70 - 0x7F: Bitwise / Logical
     //
-    And = 0x71,
-    AndValue = 0x72,
-    Or = 0x73,
-    OrValue = 0x74,
-    Xor = 0x75,
-    XorValue = 0x76,
-    Not = 0x77,
+    And = 0x70,
+    AndValue = 0x71,
+    Or = 0x72,
+    OrValue = 0x73,
+    Xor = 0x74,
+    XorValue = 0x75,
+    Not = 0x76,
 
     //
     // 0xB0 - 0xBF: Byte-level memory
@@ -301,6 +304,11 @@ pub static INSTRUCTION_PATTERNS: Lazy<HashMap<Bytecode, &'static InstructionPatt
             InstructionPattern::new(Bytecode::LoadValue, &[Register, ImmediateI32], "load"),
             InstructionPattern::new(Bytecode::LoadReg, &[Register, Register], "load"),
             InstructionPattern::new(Bytecode::Store, &[MemoryAddress, Register], "store"),
+            InstructionPattern::new(
+                Bytecode::StoreValue,
+                &[MemoryAddress, ImmediateI32],
+                "store",
+            ),
             InstructionPattern::new(Bytecode::PushValue, &[ImmediateI32], "push"),
             InstructionPattern::new(Bytecode::PushReg, &[Register], "push"),
             InstructionPattern::new(Bytecode::Pop, &[Register], "pop"),

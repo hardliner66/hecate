@@ -725,6 +725,20 @@ impl<IO: HostIO> NativeCpu<IO> {
                     self.write_memory(addr, self.registers[reg as usize])?;
                     self.stats.cycles += 1;
                 }
+                Bytecode::StoreValue => {
+                    let addr = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    let imm = self.read_memory(self.instruction_pointer)?;
+                    self.instruction_pointer += 1;
+
+                    if self.verbose {
+                        println!("STORE @{:#02x}, {}", addr, imm);
+                    }
+
+                    self.write_memory(addr, imm)?;
+                    self.stats.cycles += 1;
+                }
                 Bytecode::PushValue => {
                     let imm = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
