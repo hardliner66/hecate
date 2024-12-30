@@ -1,3 +1,5 @@
+.entry start
+
 loop:
   ; If the counter is less or equal to 1, finish
   cmp R2, 1
@@ -10,7 +12,7 @@ loop:
 end:
   ret
 
-main:
+start:
   ; Find factorial for the initial value of R2,
   load R2, 5
 

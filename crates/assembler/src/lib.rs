@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use hecate_common::{
     get_pattern, get_pattern_by_mnemonic, Bytecode, BytecodeFile, BytecodeFileHeader,
     ExpectedOperandType, InstructionPattern, OperandType,
@@ -20,6 +22,8 @@ pub enum AssemblerError {
     InvalidRegister(String),
     #[error("Invalid immediate value: {0}")]
     InvalidImmediate(String),
+    #[error("Invalid entrypoint: {0}")]
+    InvalidEntrypoint(String),
     #[error("Invalid label: {0}")]
     InvalidLabel(String),
     #[error("Undefined label: {0}")]
@@ -211,6 +215,8 @@ impl Assembler {
     }
 
     pub fn assemble_program(&mut self, program: &str) -> Result<BytecodeFile, AssemblerError> {
+        let mut settings = HashMap::new();
+
         // First pass: collect labels
         for line in program.lines() {
             let line = line.trim();
@@ -218,11 +224,14 @@ impl Assembler {
                 continue;
             }
             let line = if line.contains(";") {
-                line.split_once(";").unwrap().0
+                line.split_once(";").unwrap().0.trim()
             } else {
                 line
             };
-            if line.ends_with(':') {
+            if line.starts_with(".") {
+                let (name, value) = line.split_once(" ").unwrap();
+                settings.insert(&name[1..], value);
+            } else if line.ends_with(':') {
                 let label = &line[..line.trim().len() - 1];
                 self.labels.insert(label.to_string(), self.current_address);
             } else if let Some(p) = self.parse_line(line) {
@@ -240,6 +249,9 @@ impl Assembler {
             if line.starts_with(";") {
                 continue;
             }
+            if line.starts_with(".") {
+                continue;
+            }
             let line = if line.contains(";") {
                 line.split_once(";").unwrap().0.trim()
             } else {
@@ -249,10 +261,30 @@ impl Assembler {
             bytecode.append(&mut line_code);
         }
 
+        let entry = if let Some(entry) = settings.get("entry") {
+            if entry.starts_with("@") {
+                let entry = &entry[1..];
+                let value = if entry.starts_with("0x") {
+                    u32::from_str_radix(&entry[2..], 16)
+                } else if entry.starts_with("b") {
+                    u32::from_str_radix(&entry[2..], 2)
+                } else {
+                    entry.parse::<u32>()
+                }
+                .map_err(|_| AssemblerError::InvalidEntrypoint(entry.to_string()))?;
+                Ok(value)
+            } else {
+                Err(*entry)
+            }
+        } else {
+            Err("main")
+        };
+
         Ok(BytecodeFile {
             header: BytecodeFileHeader {
                 labels: self.labels.clone(),
-                entrypoint: self.labels.get("main").copied().unwrap_or_default(),
+                entrypoint: entry
+                    .unwrap_or_else(|label| self.labels.get(label).copied().unwrap_or_default()),
             },
             data: bytecode,
         })
