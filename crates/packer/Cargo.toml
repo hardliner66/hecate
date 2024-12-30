@@ -1,0 +1,10 @@
+[package]
+name = "hecate-packer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4.5.23", features = ["derive"] }
+hecate-common = { version = "0.1.0", path = "../common" }
+hecate-assembler = { version = "0.1.0", path = "../assembler" }
+byteorder = "1.5.0"

@@ -2,8 +2,8 @@ use hecate_common::{
     get_pattern, get_pattern_by_mnemonic, Bytecode, BytecodeFile, BytecodeFileHeader,
     ExpectedOperandType, InstructionPattern, OperandType,
 };
+use indexmap::IndexMap;
 use num_traits::cast::FromPrimitive;
-use std::collections::HashMap;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -44,14 +44,14 @@ pub enum ParsedOperand {
 }
 
 pub struct Assembler {
-    labels: HashMap<String, u32>,
+    labels: IndexMap<String, u32>,
     current_address: u32,
 }
 
 impl Assembler {
     pub fn new() -> Self {
         Self {
-            labels: HashMap::new(),
+            labels: IndexMap::new(),
             current_address: 0,
         }
     }
@@ -217,6 +217,11 @@ impl Assembler {
             if line.is_empty() && line.starts_with(";") {
                 continue;
             }
+            let line = if line.contains(";") {
+                line.split_once(";").unwrap().0
+            } else {
+                line
+            };
             if line.ends_with(':') {
                 let label = &line[..line.trim().len() - 1];
                 self.labels.insert(label.to_string(), self.current_address);
@@ -247,6 +252,7 @@ impl Assembler {
         Ok(BytecodeFile {
             header: BytecodeFileHeader {
                 labels: self.labels.clone(),
+                entrypoint: self.labels.get("main").copied().unwrap_or_default(),
             },
             data: bytecode,
         })
@@ -254,18 +260,18 @@ impl Assembler {
 }
 
 pub struct Disassembler {
-    labels: HashMap<u32, String>,
+    labels: IndexMap<u32, String>,
 }
 
 impl Disassembler {
     pub fn new() -> Self {
         Self {
-            labels: HashMap::new(),
+            labels: IndexMap::new(),
         }
     }
 
     pub fn from_bytecode_file(file: &BytecodeFile) -> Self {
-        let reverse_labels: HashMap<u32, String> = file
+        let reverse_labels: IndexMap<u32, String> = file
             .header
             .labels
             .iter()

@@ -7,6 +7,7 @@ use std::{
     path::Path,
 };
 
+use indexmap::IndexMap;
 use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::Unsigned;
 use once_cell::sync::Lazy;
@@ -53,6 +54,8 @@ pub trait CpuTrait {
     type Size: Unsigned;
     fn set_verbose(&mut self, verbose: bool);
 
+    fn set_entrypoint(&mut self, entrypoint: u32);
+
     fn load_memory(&mut self, address: Self::Size, memory: &[Self::Size]);
     fn load_protected_memory(&mut self, address: Self::Size, memory: &[Self::Size]);
 
@@ -84,7 +87,8 @@ pub enum DebugMode {
 
 #[derive(Debug, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct BytecodeFileHeader {
-    pub labels: HashMap<String, u32>,
+    pub labels: IndexMap<String, u32>,
+    pub entrypoint: u32,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default, PartialEq, Eq)]

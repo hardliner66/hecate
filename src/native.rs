@@ -145,6 +145,10 @@ impl<IO: HostIO> CpuTrait for NativeCpu<IO> {
         self.verbose = verbose;
     }
 
+    fn set_entrypoint(&mut self, entrypoint: u32) {
+        self.instruction_pointer = entrypoint;
+    }
+
     fn protect(&mut self, range: Range<Self::Size>) {
         self.protected_memory = range;
     }

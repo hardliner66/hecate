@@ -13,4 +13,4 @@ num-derive = "0.4.2"
 num-traits = "0.2.19"
 
 [workspace]
-members = ["crates/common", "crates/assembler"]
+members = ["crates/common", "crates/assembler", "crates/packer"]

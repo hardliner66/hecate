@@ -162,6 +162,7 @@ dependencies = [
  "byteorder",
  "clap",
  "hecate-common",
+ "indexmap",
  "insta",
  "num-derive",
  "num-traits",
@@ -180,6 +181,16 @@ dependencies = [
  "serde",
  "strum",
  "thiserror",
+]
+
+[[package]]
+name = "hecate-packer"
+version = "0.1.0"
+dependencies = [
+ "byteorder",
+ "clap",
+ "hecate-assembler",
+ "hecate-common",
 ]
 
 [[package]]
