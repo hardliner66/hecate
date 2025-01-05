@@ -100,6 +100,7 @@ pub struct BytecodeFile {
 }
 
 impl BytecodeFile {
+    #[must_use]
     pub fn new(data: Vec<u32>) -> Self {
         Self {
             data,
@@ -247,12 +248,12 @@ pub enum Bytecode {
     //
     // 0xFFFFFFF0: Debug
     //
-    Inspect = 0xFFFFFFF0,
+    Inspect = 0xFFFF_FFF0,
 
     //
     // 0xFFFFFFFF: Termination
     //
-    Halt = 0xFFFFFFFF,
+    Halt = 0xFFFF_FFFF,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -296,7 +297,9 @@ impl InstructionPattern {
 
 pub static INSTRUCTION_PATTERNS: Lazy<HashMap<Bytecode, &'static InstructionPattern>> =
     Lazy::new(|| {
-        use ExpectedOperandType::*;
+        use ExpectedOperandType::{
+            ImmediateF32, ImmediateI32, LabelOrAddress, MemoryAddress, Register,
+        };
 
         static PATTERNS: &[InstructionPattern] = &[
             InstructionPattern::new(Bytecode::Nop, &[], "nop"),
@@ -393,20 +396,24 @@ pub fn get_pattern_by_mnemonic(
         .find(|pattern| {
             pattern.mnemonic == mnemonic
                 && pattern.operands.len() == args.len()
-                && pattern
-                    .operands
-                    .iter()
-                    .zip(args)
-                    .all(|(a, b)| match (a, b) {
-                        (ExpectedOperandType::Register, OperandType::Register) => true,
-                        (ExpectedOperandType::ImmediateI32, OperandType::ImmediateI32) => true,
-                        (ExpectedOperandType::ImmediateF32, OperandType::ImmediateI32) => true,
-                        (ExpectedOperandType::ImmediateF32, OperandType::ImmediateF32) => true,
-                        (ExpectedOperandType::MemoryAddress, OperandType::MemoryAddress) => true,
-                        (ExpectedOperandType::LabelOrAddress, OperandType::MemoryAddress) => true,
-                        (ExpectedOperandType::LabelOrAddress, OperandType::Label) => true,
-                        _ => false,
-                    })
+                && pattern.operands.iter().zip(args).all(|(a, b)| {
+                    matches!(
+                        (a, b),
+                        (ExpectedOperandType::Register, OperandType::Register)
+                            | (ExpectedOperandType::ImmediateI32, OperandType::ImmediateI32)
+                            | (ExpectedOperandType::ImmediateF32, OperandType::ImmediateI32)
+                            | (ExpectedOperandType::ImmediateF32, OperandType::ImmediateF32)
+                            | (
+                                ExpectedOperandType::MemoryAddress,
+                                OperandType::MemoryAddress
+                            )
+                            | (
+                                ExpectedOperandType::LabelOrAddress,
+                                OperandType::MemoryAddress
+                            )
+                            | (ExpectedOperandType::LabelOrAddress, OperandType::Label)
+                    )
+                })
         })
         .copied()
 }

@@ -52,6 +52,12 @@ pub struct Assembler {
     current_address: u32,
 }
 
+impl Default for Assembler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Assembler {
     pub fn new() -> Self {
         Self {
@@ -79,10 +85,10 @@ impl Assembler {
                 Ok(ParsedOperand::Register(Self::parse_register(operand)?))
             }
             ExpectedOperandType::ImmediateI32 => {
-                let value = if operand.starts_with("0x") {
-                    i32::from_str_radix(&operand[2..], 16)
-                } else if operand.starts_with("b") {
-                    i32::from_str_radix(&operand[2..], 2)
+                let value = if let Some(operand) = operand.strip_prefix("0x") {
+                    i32::from_str_radix(operand, 16)
+                } else if let Some(operand) = operand.strip_prefix("b") {
+                    i32::from_str_radix(operand, 2)
                 } else {
                     operand.parse::<i32>()
                 }
@@ -96,7 +102,7 @@ impl Assembler {
                 Ok(ParsedOperand::ImmediateF32(value))
             }
             ExpectedOperandType::MemoryAddress => {
-                let addr = if operand.starts_with('@') {
+                let addr = if let Some(operand) = operand.strip_prefix('@') {
                     operand[1..]
                         .parse::<u32>()
                         .map_err(|_| AssemblerError::InvalidImmediate(operand.to_string()))?
@@ -190,10 +196,10 @@ impl Assembler {
                         Ok(OperandType::MemoryAddress)
                     } else if a.starts_with("@") && a[1..].is_ascii() {
                         Ok(OperandType::Label)
-                    } else if (if a.starts_with("0x") {
-                        i32::from_str_radix(&a[2..], 16)
-                    } else if a.starts_with("b") {
-                        i32::from_str_radix(&a[2..], 2)
+                    } else if (if let Some(a) = a.strip_prefix("0x") {
+                        i32::from_str_radix(a, 16)
+                    } else if let Some(a) = a.strip_prefix("b") {
+                        i32::from_str_radix(a, 2)
                     } else {
                         a.parse::<i32>()
                     })
@@ -262,12 +268,11 @@ impl Assembler {
         }
 
         let entry = if let Some(entry) = settings.get("entry") {
-            if entry.starts_with("@") {
-                let entry = &entry[1..];
-                let value = if entry.starts_with("0x") {
-                    u32::from_str_radix(&entry[2..], 16)
-                } else if entry.starts_with("b") {
-                    u32::from_str_radix(&entry[2..], 2)
+            if let Some(entry) = entry.strip_prefix("@") {
+                let value = if let Some(entry) = entry.strip_prefix("0x") {
+                    u32::from_str_radix(entry, 16)
+                } else if let Some(entry) = entry.strip_prefix("b") {
+                    u32::from_str_radix(entry, 2)
                 } else {
                     entry.parse::<u32>()
                 }
@@ -293,6 +298,12 @@ impl Assembler {
 
 pub struct Disassembler {
     labels: IndexMap<u32, String>,
+}
+
+impl Default for Disassembler {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Disassembler {
@@ -433,7 +444,7 @@ mod tests {
 
     #[test]
     fn test_roundtrip() {
-        let program = "start:\nload r0, 42\nadd r0, 10\njmp @start\n";
+        let program = "start:\nload r0, 42\nadd r0, 10\n jmp @start\n";
         let mut assembler = Assembler::new();
         let bytecode = assembler.assemble_program(program).unwrap();
         let disassembler = Disassembler::from_bytecode_file(&bytecode);

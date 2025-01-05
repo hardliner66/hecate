@@ -37,7 +37,7 @@ impl HostIO for SimpleHostIo {
                 let length = cpu.get_registers()[2] as usize;
                 let mem = &cpu.get_memory()[start..start + length];
                 let s = String::from_utf8(
-                    mem.into_iter()
+                    mem.iter()
                         .map(|v| u8::from_le_bytes([v.to_le_bytes()[0]]))
                         .collect::<Vec<_>>(),
                 )
