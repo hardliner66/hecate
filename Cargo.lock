@@ -321,6 +321,7 @@ dependencies = [
  "clap",
  "fck",
  "hecate-assembler",
+ "hecate-common",
  "stringlit",
 ]
 
@@ -356,6 +357,7 @@ dependencies = [
  "byteorder",
  "clap",
  "hecate-assembler",
+ "hecate-bf",
  "hecate-common",
  "macroquad",
  "num-derive",
