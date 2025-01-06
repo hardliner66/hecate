@@ -1,6 +1,6 @@
 [package]
 name = "hecate-packer"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "The packer for the hecate vm"
 license-file = "../../LICENSE"
@@ -12,6 +12,6 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4.5.23", features = ["derive"] }
-hecate-common = { version = "0.2.0", path = "../common" }
-hecate-assembler = { version = "0.2.0", path = "../assembler" }
+hecate-common = { version = "0.3.0", path = "../common" }
+hecate-assembler = { version = "0.3.0", path = "../assembler" }
 byteorder = "1.5.0"

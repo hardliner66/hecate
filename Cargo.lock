@@ -302,7 +302,7 @@ checksum = "bf151400ff0baff5465007dd2f3e717f3fe502074ca563069ce3a6629d07b289"
 
 [[package]]
 name = "hecate-assembler"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "clap",
  "hecate-common",
@@ -315,7 +315,7 @@ dependencies = [
 
 [[package]]
 name = "hecate-bf"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -326,7 +326,7 @@ dependencies = [
 
 [[package]]
 name = "hecate-common"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "bincode",
  "indexmap",
@@ -340,7 +340,7 @@ dependencies = [
 
 [[package]]
 name = "hecate-packer"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "byteorder",
  "clap",
@@ -350,7 +350,7 @@ dependencies = [
 
 [[package]]
 name = "hecate-vm"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "byteorder",
