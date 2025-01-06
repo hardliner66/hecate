@@ -1,0 +1,109 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  tests:
+    uses: ./.github/workflows/tests.yml # use the callable tests job to run tests
+
+  release:
+    runs-on: ubuntu-latest
+    needs: tests
+    permissions: write-all
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Create release
+        uses: actions/create-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-linux:
+    runs-on: ubuntu-latest
+    permissions: write-all
+    needs: release
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Run tests
+        run: cargo test --verbose
+
+      - name: Run build
+        run: |
+          cargo build --all --release
+          strip --strip-all ./target/release/hasm
+          strip --strip-all ./target/release/hecate-vm
+          strip --strip-all ./target/release/hepack
+          tar -czf hecate-linux.tar.gz -C ./target/release/ hasm hecate-vm hepack
+
+      - name: Upload release
+        id: upload-release-linux
+        uses: alexellis/upload-assets@0.2.3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_paths: '["hecate-linux.tar.gz"]'
+
+  build-macos:
+    runs-on: macos-latest
+    permissions: write-all
+    needs: release
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Run tests
+        run: cargo test --verbose
+
+      - name: Run build
+        run: |
+          cargo build --all --release
+          tar -czf hecate-macos.tar.gz -C ./target/release/ hasm hecate-vm hepack
+
+      - name: Upload release
+        id: upload-release-linux
+        uses: alexellis/upload-assets@0.2.3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_paths: '["hecate-macos.tar.gz"]'
+
+  build-windows:
+    runs-on: windows-2019
+    permissions: write-all
+    needs: release
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Run tests
+        run: cargo test --verbose
+
+      - name: Run build
+        run: cargo build --all --release
+
+      - name: Create Zip
+        run: Compress-Archive -Path ./target/release/*.exe -Destination hecate-windows.zip
+
+      - name: Upload release
+        id: upload-release-windows
+        uses: alexellis/upload-assets@0.2.3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_paths: '["hecate-windows.zip"]'
