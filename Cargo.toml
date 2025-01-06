@@ -7,13 +7,18 @@ license-file = "LICENSE"
 repository = "https://github.com/hecate-vm/hecate-vm"
 
 [dependencies]
-anyhow = "1.0.94"
+anyhow = "1.0.95"
 byteorder = "1.5.0"
 clap = { version = "4.5.22", features = ["derive"] }
 hecate-common = { version = "0.2.0", path = "crates/common" }
 hecate-assembler = { version = "0.2.0", path = "crates/assembler" }
 num-derive = "0.4.2"
 num-traits = "0.2.19"
+macroquad = "0.4.13"
+
+[features]
+default = []
+experimental_ui = []
 
 [workspace]
 members = ["crates/common", "crates/assembler", "crates/packer"]

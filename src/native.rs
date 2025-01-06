@@ -145,10 +145,19 @@ pub struct NativeCpu<IO: HostIO> {
     last_load_addresses: Vec<u32>,
     stable_stride: Option<i32>,
     host_io: Option<IO>,
+    halted: bool,
 }
 
 impl<IO: HostIO> CpuTrait for NativeCpu<IO> {
     type Size = u32;
+
+    fn set_halted(&mut self, halted: bool) {
+        self.halted = halted;
+    }
+
+    fn get_halted(&self) -> bool {
+        self.halted
+    }
 
     fn set_verbose(&mut self, verbose: bool) {
         self.verbose = verbose;
@@ -210,6 +219,7 @@ impl<IO: HostIO> NativeCpu<IO> {
             last_load_addresses: Vec::new(),
             stable_stride: None,
             host_io: Some(host_io),
+            halted: false,
         }
     }
     /// Perform a logical left shift by `count` bits, returning (new_value, carry_bit).
@@ -734,6 +744,10 @@ impl<IO: HostIO> NativeCpu<IO> {
     }
 
     fn run(&mut self, cycles: isize) -> Result<CpuStats, ExecutionError> {
+        if self.halted {
+            return Ok(self.stats);
+        }
+
         let mut executed = 0;
 
         while (cycles < 0 || executed < cycles)
@@ -1438,6 +1452,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     println!("INSPECT @{:#02x} = {}", addr, self.read_memory(addr)?);
                 }
                 Bytecode::Halt => {
+                    self.set_halted(true);
                     if self.verbose {
                         println!("HALT");
                     }

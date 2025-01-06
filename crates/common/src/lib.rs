@@ -68,6 +68,8 @@ pub trait CpuTrait {
     fn get_registers(&self) -> &[Self::Size];
 
     fn get_memory(&self) -> &[Self::Size];
+    fn set_halted(&mut self, halted: bool);
+    fn get_halted(&self) -> bool;
 }
 
 #[derive(Debug)]

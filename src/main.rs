@@ -4,6 +4,12 @@ use clap::{Parser, Subcommand};
 use hecate_common::{BytecodeFile, CpuTrait, RunMode};
 use native::{HostIO, NativeCpu};
 
+#[cfg(feature = "experimental_ui")]
+use macroquad::{prelude::*, ui::root_ui};
+
+#[cfg(not(feature = "experimental_ui"))]
+use macroquad::prelude::Conf;
+
 mod native;
 
 #[derive(Parser)]
@@ -16,8 +22,14 @@ struct Args {
 
 #[derive(Subcommand)]
 enum Action {
-    Run { path: PathBuf },
-    RunAsm { path: PathBuf },
+    #[cfg(feature = "experimental_ui")]
+    Gui,
+    Run {
+        path: PathBuf,
+    },
+    RunAsm {
+        path: PathBuf,
+    },
 }
 
 #[derive(Debug)]
@@ -67,10 +79,60 @@ fn run(memory: &[u32], entrypoint: u32, verbose: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn main() -> anyhow::Result<()> {
+#[cfg(feature = "experimental_ui")]
+async fn run_gui() -> anyhow::Result<()> {
+    let mut cpu = NativeCpu::new(1024 * 1024, 32, SimpleHostIo);
+    cpu.set_verbose(true);
+
+    let mut paused = true;
+    let mut running = true;
+    while running {
+        clear_background(WHITE);
+
+        if if paused {
+            root_ui().button(None, "Unpause")
+        } else {
+            root_ui().button(None, "Pause")
+        } {
+            paused = !paused;
+        }
+
+        if root_ui().button(None, "Stop") {
+            running = false;
+        }
+
+        if !paused {
+            cpu.execute(RunMode::RunFor(1))?;
+        }
+
+        if cpu.get_halted() {
+            running = false;
+        }
+
+        next_frame().await
+    }
+
+    Ok(())
+}
+
+fn conf() -> Conf {
+    Conf {
+        window_title: "Hecate VM".to_string(),
+        window_width: 800,
+        window_height: 600,
+        ..Default::default()
+    }
+}
+
+#[macroquad::main(conf)]
+async fn main() -> anyhow::Result<()> {
     let Args { action, verbose } = Args::parse();
 
     match action {
+        #[cfg(feature = "experimental_ui")]
+        Action::Gui => {
+            run_gui().await?;
+        }
         Action::Run { path } => {
             let file = BytecodeFile::load(path).unwrap();
 
