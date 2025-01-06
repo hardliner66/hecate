@@ -27,6 +27,7 @@
 		"repr",
 		"storebyte",
 		"storereg",
+		"stringlit",
 		"strs",
 		"syscall",
 		"thiserror"
