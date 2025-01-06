@@ -4,6 +4,12 @@ use clap::{Parser, Subcommand};
 use hecate_common::{BytecodeFile, CpuTrait, RunMode};
 use native::{HostIO, NativeCpu};
 
+#[cfg(feature = "experimental_ui")]
+use macroquad::prelude::*;
+
+#[cfg(feature = "experimental_ui")]
+use macroquad::ui::root_ui;
+
 #[cfg(not(feature = "experimental_ui"))]
 use macroquad::prelude::Conf;
 
