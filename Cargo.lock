@@ -321,6 +321,7 @@ dependencies = [
  "clap",
  "fck",
  "hecate-assembler",
+ "stringlit",
 ]
 
 [[package]]
@@ -725,6 +726,12 @@ name = "smallvec"
 version = "1.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3c5e1a9a646d36c3599cd173a41282daf47c44583ad367b8e6837255952e5c67"
+
+[[package]]
+name = "stringlit"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e80de30f6a4915f4277c75980dea789ea6b895039ce61ad2a3b79a8787e7ada1"
 
 [[package]]
 name = "strsim"

@@ -218,7 +218,7 @@ impl Assembler {
                     } else if a.parse::<f32>().is_ok() {
                         Ok(OperandType::ImmediateF32)
                     } else {
-                        Err("Invalid operand!")
+                        Err(format!("Invalid operand! {a}"))
                     }
                 })
                 .collect::<Result<Vec<_>, _>>()

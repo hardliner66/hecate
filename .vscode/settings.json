@@ -20,10 +20,13 @@
 		"insta",
 		"Jxcz",
 		"loadbyte",
+		"loadreg",
+		"macroquad",
 		"pline",
 		"prefetcher",
 		"repr",
 		"storebyte",
+		"storereg",
 		"strs",
 		"syscall",
 		"thiserror"

@@ -1,66 +1,154 @@
-    nop
-    load R1, 42
-    load R2, @100
-    load R3, R1
-    store @101, R3
-    push 123
-    push R2
-    pop R4
-    add R1, R4
-    add R4, 7
-    sub R4, R3
-    sub R3, 10
-    mul R1, R4
-    mul R4, 2
-    div R1, R3
-    div R3, 2
-    fadd R5, R6
-    fadd R5, 3.14
-    fsub R6, R7
-    fsub R6, 1
-    fmul R5, R6
-    fmul R5, 2
-    fdiv R6, R5
-    fdiv R6, 2
-    and R1, R2
-    and R1, 255
-    or R2, R3
-    or R2, 255
-    xor R1, R4
-    xor R1, 4660
-    not R1
-    loadbyte R7, @202
-    storebyte @203, R7
-    cmp R1, R2
-    cmp R1, 42
-    fcmp R5, R6
-    fcmp R5, 1.25
-    jmp @label_unconditional
-label_compare:
-    je @label_sign
-    jne @label_sign
-    jg @label_sign
-    jge @label_sign
-    jl @label_sign
-    jle @label_sign
-    ja @label_sign
-    jae @label_sign
-    jb @label_sign
-    jbe @label_sign
-    jc @label_sign
-    jnc @label_sign
-    jo @label_sign
-    jno @label_sign
-    js @label_sign
-    jns @label_sign
-    jxcz @label_sign
-label_unconditional:
-    call @subroutine
-    syscall
-    inspect @200
-    halt
-subroutine:
-    load R8, 999
-    ret
-label_sign:
-    ret
+load R10, 500
+loadreg R12, R10
+add R12, 8
+storereg R10, R12
+loop_start_4:
+loadreg R11, R10
+cmp R11, R0
+je @loop_end_4
+add R10, 1
+loadreg R12, R10
+add R12, 4
+storereg R10, R12
+loop_start_12:
+loadreg R11, R10
+cmp R11, R0
+je @loop_end_12
+add R10, 1
+loadreg R12, R10
+add R12, 2
+storereg R10, R12
+add R10, 1
+loadreg R12, R10
+add R12, 3
+storereg R10, R12
+add R10, 1
+loadreg R12, R10
+add R12, 3
+storereg R10, R12
+add R10, 1
+loadreg R12, R10
+add R12, 1
+storereg R10, R12
+sub R10, 4
+loadreg R12, R10
+sub R12, 1
+storereg R10, R12
+jmp @loop_start_12
+loop_end_12:
+add R10, 1
+loadreg R12, R10
+add R12, 1
+storereg R10, R12
+add R10, 1
+loadreg R12, R10
+add R12, 1
+storereg R10, R12
+add R10, 1
+loadreg R12, R10
+sub R12, 1
+storereg R10, R12
+add R10, 2
+loadreg R12, R10
+add R12, 1
+storereg R10, R12
+loop_start_54:
+loadreg R11, R10
+cmp R11, R0
+je @loop_end_54
+sub R10, 1
+jmp @loop_start_54
+loop_end_54:
+sub R10, 1
+loadreg R12, R10
+sub R12, 1
+storereg R10, R12
+jmp @loop_start_4
+loop_end_4:
+add R10, 2
+load R1, R0
+load R2, R10
+load R3, 1
+syscall
+add R10, 1
+loadreg R12, R10
+sub R12, 3
+storereg R10, R12
+load R1, R0
+load R2, R10
+load R3, 1
+syscall
+loadreg R12, R10
+add R12, 7
+storereg R10, R12
+load R1, R0
+load R2, R10
+load R3, 1
+syscall
+load R1, R0
+load R2, R10
+load R3, 1
+syscall
+loadreg R12, R10
+add R12, 3
+storereg R10, R12
+load R1, R0
+load R2, R10
+load R3, 1
+syscall
+add R10, 2
+load R1, R0
+load R2, R10
+load R3, 1
+syscall
+sub R10, 1
+loadreg R12, R10
+sub R12, 1
+storereg R10, R12
+load R1, R0
+load R2, R10
+load R3, 1
+syscall
+sub R10, 1
+load R1, R0
+load R2, R10
+load R3, 1
+syscall
+loadreg R12, R10
+add R12, 3
+storereg R10, R12
+load R1, R0
+load R2, R10
+load R3, 1
+syscall
+loadreg R12, R10
+sub R12, 6
+storereg R10, R12
+load R1, R0
+load R2, R10
+load R3, 1
+syscall
+loadreg R12, R10
+sub R12, 8
+storereg R10, R12
+load R1, R0
+load R2, R10
+load R3, 1
+syscall
+add R10, 2
+loadreg R12, R10
+add R12, 1
+storereg R10, R12
+load R1, R0
+load R2, R10
+load R3, 1
+syscall
+add R10, 1
+loadreg R12, R10
+add R12, 2
+storereg R10, R12
+load R1, R0
+load R2, R10
+load R3, 1
+syscall
+halt

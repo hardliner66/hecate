@@ -35,6 +35,8 @@ pub enum ExecutionError {
     NoHostIO,
     #[error("Invalid Syscall: {0}")]
     InvalidSyscall(u32),
+    #[error("FromUtf8Error: {0}")]
+    FromUtf8Error(#[from] std::string::FromUtf8Error),
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -56,6 +58,7 @@ pub trait CpuTrait {
     type Size: Unsigned;
     fn set_verbose(&mut self, verbose: bool);
     fn set_print_memory_access(&mut self, show_memory_access: bool);
+    fn set_addresses_as_integers(&mut self, addresses_as_integers: bool);
 
     fn set_entrypoint(&mut self, entrypoint: u32);
 
@@ -71,6 +74,8 @@ pub trait CpuTrait {
     fn get_memory(&self) -> &[Self::Size];
     fn set_halted(&mut self, halted: bool);
     fn get_halted(&self) -> bool;
+
+    fn print_state(&self);
 }
 
 #[derive(Debug)]
@@ -149,11 +154,14 @@ pub enum Bytecode {
     LoadValue = 0x01,
     LoadMemory = 0x02,
     LoadReg = 0x03,
-    Store = 0x04,
-    StoreValue = 0x05,
-    PushValue = 0x06,
-    PushReg = 0x07,
-    Pop = 0x08,
+    LoadFromRegMemory = 0x04,
+    Store = 0x05,
+    StoreValue = 0x06,
+    StoreAtReg = 0x07,
+    StoreValueAtReg = 0x08,
+    PushValue = 0x09,
+    PushReg = 0x0a,
+    Pop = 0x0b,
 
     //
     // 0x10 - 0x2F: Arithmetic
@@ -311,6 +319,11 @@ pub static INSTRUCTION_PATTERNS: Lazy<HashMap<Bytecode, &'static InstructionPatt
         static PATTERNS: &[InstructionPattern] = &[
             InstructionPattern::new(Bytecode::Nop, &[], "nop"),
             InstructionPattern::new(Bytecode::LoadMemory, &[Register, MemoryAddress], "load"),
+            InstructionPattern::new(
+                Bytecode::LoadFromRegMemory,
+                &[Register, Register],
+                "loadreg",
+            ),
             InstructionPattern::new(Bytecode::LoadValue, &[Register, ImmediateI32], "load"),
             InstructionPattern::new(Bytecode::LoadReg, &[Register, Register], "load"),
             InstructionPattern::new(Bytecode::Store, &[MemoryAddress, Register], "store"),
@@ -318,6 +331,12 @@ pub static INSTRUCTION_PATTERNS: Lazy<HashMap<Bytecode, &'static InstructionPatt
                 Bytecode::StoreValue,
                 &[MemoryAddress, ImmediateI32],
                 "store",
+            ),
+            InstructionPattern::new(Bytecode::StoreAtReg, &[Register, Register], "storereg"),
+            InstructionPattern::new(
+                Bytecode::StoreValueAtReg,
+                &[Register, ImmediateI32],
+                "storereg",
             ),
             InstructionPattern::new(Bytecode::PushValue, &[ImmediateI32], "push"),
             InstructionPattern::new(Bytecode::PushReg, &[Register], "push"),

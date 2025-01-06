@@ -4,9 +4,6 @@ use clap::{Parser, Subcommand};
 use hecate_common::{BytecodeFile, CpuTrait, RunMode};
 use native::{HostIO, NativeCpu};
 
-#[cfg(feature = "experimental_ui")]
-use macroquad::{prelude::*, ui::root_ui};
-
 #[cfg(not(feature = "experimental_ui"))]
 use macroquad::prelude::Conf;
 
@@ -18,6 +15,14 @@ struct Args {
     verbose: bool,
     #[arg(short, long, global = true)]
     print_memory_access: bool,
+    #[arg(short, long, global = true)]
+    show_cpu_state: bool,
+    #[arg(short, long, global = true)]
+    addresses_as_integers: bool,
+    #[arg(short, long, global = true, default_value = "1048576")]
+    memory_size: u32,
+    #[arg(short, long, global = true, default_value = "32")]
+    register_count: u8,
     #[command(subcommand)]
     action: Action,
 }
@@ -54,9 +59,8 @@ impl HostIO for SimpleHostIo {
                     mem.iter()
                         .map(|v| u8::from_le_bytes([v.to_le_bytes()[0]]))
                         .collect::<Vec<_>>(),
-                )
-                .unwrap();
-                print!("{s}");
+                )?;
+                eprint!("{s}");
                 Ok(2500 + (length * 300))
             }
             _ => Err(hecate_common::ExecutionError::InvalidSyscall(code)),
@@ -64,26 +68,36 @@ impl HostIO for SimpleHostIo {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run(
-    memory: &[u32],
+    rom: &[u32],
+    total_memory_size: u32,
     entrypoint: u32,
+    register_count: u8,
     verbose: bool,
     print_memory_access: bool,
+    show_cpu_state: bool,
+    addresses_as_integers: bool,
 ) -> anyhow::Result<()> {
-    let mut cpu = NativeCpu::new(1024 * 1024, 32, SimpleHostIo);
+    let mut cpu = NativeCpu::new(total_memory_size, register_count, SimpleHostIo);
     cpu.set_verbose(verbose);
     cpu.set_print_memory_access(print_memory_access);
     cpu.set_entrypoint(entrypoint);
+    cpu.set_addresses_as_integers(addresses_as_integers);
 
-    cpu.load_protected_memory(0, memory);
+    cpu.load_protected_memory(0, rom);
 
-    let stats = cpu.execute(RunMode::Run)?;
+    let result = cpu.execute(RunMode::Run);
 
     println!();
-    println!(" ========== STATS ===========");
+    println!("========== RESULT/STATS ===========");
     println!();
 
-    println!("{:#?}", stats);
+    println!("{:#?}", result);
+
+    if show_cpu_state {
+        cpu.print_state();
+    }
     Ok(())
 }
 
@@ -138,6 +152,10 @@ async fn main() -> anyhow::Result<()> {
         action,
         verbose,
         print_memory_access,
+        show_cpu_state,
+        memory_size,
+        register_count,
+        addresses_as_integers,
     } = Args::parse();
 
     match action {
@@ -150,9 +168,13 @@ async fn main() -> anyhow::Result<()> {
 
             run(
                 &file.data,
+                memory_size,
                 file.header.entrypoint,
+                register_count,
                 verbose,
                 print_memory_access,
+                show_cpu_state,
+                addresses_as_integers,
             )?;
         }
 
@@ -163,9 +185,13 @@ async fn main() -> anyhow::Result<()> {
 
             run(
                 &memory.data,
+                memory_size,
                 memory.header.entrypoint,
+                register_count,
                 verbose,
                 print_memory_access,
+                show_cpu_state,
+                addresses_as_integers,
             )?;
         }
     }

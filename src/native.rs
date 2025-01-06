@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::{collections::BTreeMap, ops::Range};
 
 use hecate_common::{Bytecode, CpuStats, CpuTrait, ExecutionError, RunMode};
 use num_traits::FromPrimitive;
@@ -147,10 +147,35 @@ pub struct NativeCpu<IO: HostIO> {
     halted: bool,
     verbose: bool,
     print_memory_access: bool,
+    addresses_as_integers: bool,
 }
 
 impl<IO: HostIO> CpuTrait for NativeCpu<IO> {
     type Size = u32;
+
+    fn set_addresses_as_integers(&mut self, addresses_as_integers: bool) {
+        self.addresses_as_integers = addresses_as_integers;
+    }
+
+    fn print_state(&self) {
+        println!();
+        println!("========== VM STATE ===========");
+        println!();
+        println!("IP: {}", self.instruction_pointer);
+        println!("SP: {}", self.stack_pointer);
+        println!("Flags: {:#?}", self.flags);
+        println!(
+            "Registers: {:#?}",
+            self.registers
+                .iter()
+                .enumerate()
+                .collect::<BTreeMap<_, _>>()
+        );
+        println!(
+            "Memory: {:#?}",
+            self.memory.iter().enumerate().collect::<BTreeMap<_, _>>()
+        );
+    }
 
     fn set_halted(&mut self, halted: bool) {
         self.halted = halted;
@@ -226,8 +251,10 @@ impl<IO: HostIO> NativeCpu<IO> {
             host_io: Some(host_io),
             halted: false,
             print_memory_access: false,
+            addresses_as_integers: false,
         }
     }
+
     /// Perform a logical left shift by `count` bits, returning (new_value, carry_bit).
     fn shift_left(&self, value: u32, count: u32) -> (u32, bool) {
         let shift = count & SHIFT_MASK;
@@ -441,7 +468,11 @@ impl<IO: HostIO> NativeCpu<IO> {
     fn read_instruction(&mut self, address: u32) -> Result<Bytecode, ExecutionError> {
         self.valid_address(address)?;
         if self.print_memory_access {
-            print!("READ INSTR @{:#02x}", address);
+            if self.addresses_as_integers {
+                print!("READ INSTR @{}", address);
+            } else {
+                print!("READ INSTR @{:#02x}", address);
+            }
         }
         let cost = self.access(address, MemoryAccessDirection::LoadInstruction);
         self.stats.cycles += cost;
@@ -471,7 +502,11 @@ impl<IO: HostIO> NativeCpu<IO> {
     fn read_memory(&mut self, address: u32) -> Result<u32, ExecutionError> {
         self.valid_address(address)?;
         if self.print_memory_access {
-            print!("READ @{:#02x}", address);
+            if self.addresses_as_integers {
+                print!("READ @{}", address);
+            } else {
+                print!("READ @{:#02x}", address);
+            }
         }
         let cost = self.access(address, MemoryAccessDirection::LoadData);
         self.stats.cycles += cost;
@@ -489,7 +524,11 @@ impl<IO: HostIO> NativeCpu<IO> {
             return Err(ExecutionError::WriteProtectedMemory(address));
         }
         if self.print_memory_access {
-            print!("WRITE @{:#02x}, {}", address, value);
+            if self.addresses_as_integers {
+                print!("WRITE @{}, {}", address, value);
+            } else {
+                print!("WRITE @{:#02x}, {}", address, value);
+            }
         }
         let cost = self.access(address, MemoryAccessDirection::Store);
         self.stats.cycles += cost;
@@ -777,12 +816,33 @@ impl<IO: HostIO> NativeCpu<IO> {
 
                     self.write_register(reg, imm);
                 }
+                Bytecode::LoadFromRegMemory => {
+                    let reg1 = self.read_operand(self.instruction_pointer)?;
+                    let reg2 = self.read_operand(self.instruction_pointer)?;
+
+                    let addr = self.read_register(reg2);
+
+                    if self.verbose {
+                        if self.addresses_as_integers {
+                            println!("LOADREG R{}, R{}(@{})", reg1, reg2, addr);
+                        } else {
+                            println!("LOADREG R{}, R{}(@{:#02x})", reg1, reg2, addr);
+                        }
+                    }
+
+                    let value = self.read_memory(addr)?;
+                    self.write_register(reg1, value);
+                }
                 Bytecode::LoadMemory => {
                     let reg = self.read_operand(self.instruction_pointer)?;
                     let addr = self.read_operand(self.instruction_pointer)?;
 
                     if self.verbose {
-                        println!("LOAD R{}, @{:#02x}", reg, addr);
+                        if self.addresses_as_integers {
+                            println!("LOAD R{}, @{}", reg, addr);
+                        } else {
+                            println!("LOAD R{}, @{:#02x}", reg, addr);
+                        }
                     }
 
                     let value = self.read_memory(addr)?;
@@ -803,17 +863,57 @@ impl<IO: HostIO> NativeCpu<IO> {
                     let reg = self.read_operand(self.instruction_pointer)?;
 
                     if self.verbose {
-                        println!("STORE @{:#02x}, R{}", addr, reg);
+                        if self.addresses_as_integers {
+                            println!("STORE @{}, R{}", addr, reg);
+                        } else {
+                            println!("STORE @{:#02x}, R{}", addr, reg);
+                        }
                     }
 
                     self.write_memory(addr, self.read_register(reg))?;
+                }
+                Bytecode::StoreAtReg => {
+                    let reg1 = self.read_operand(self.instruction_pointer)?;
+                    let reg2 = self.read_operand(self.instruction_pointer)?;
+
+                    let addr = self.read_register(reg1);
+
+                    if self.verbose {
+                        if self.addresses_as_integers {
+                            println!("STOREREG R{}(@{}), R{}", reg1, addr, reg2);
+                        } else {
+                            println!("STOREREG R{}(@{:#02x}), R{}", reg1, addr, reg2);
+                        }
+                    }
+
+                    self.write_memory(addr, self.read_register(reg2))?;
                 }
                 Bytecode::StoreValue => {
                     let addr = self.read_operand(self.instruction_pointer)?;
                     let imm = self.read_operand(self.instruction_pointer)?;
 
                     if self.verbose {
-                        println!("STORE @{:#02x}, {}", addr, imm);
+                        if self.addresses_as_integers {
+                            println!("STORE @{}, {}", addr, imm);
+                        } else {
+                            println!("STORE @{:#02x}, {}", addr, imm);
+                        }
+                    }
+
+                    self.write_memory(addr, imm)?;
+                }
+                Bytecode::StoreValueAtReg => {
+                    let reg = self.read_operand(self.instruction_pointer)?;
+                    let imm = self.read_operand(self.instruction_pointer)?;
+
+                    let addr = self.read_register(reg);
+
+                    if self.verbose {
+                        if self.addresses_as_integers {
+                            println!("STOREREG R{}(@{}), {}", reg, addr, imm);
+                        } else {
+                            println!("STOREREG R{}(@{:#02x}), {}", reg, addr, imm);
+                        }
                     }
 
                     self.write_memory(addr, imm)?;
@@ -1423,7 +1523,11 @@ impl<IO: HostIO> NativeCpu<IO> {
                     let target = self.read_operand(self.instruction_pointer)?;
 
                     if self.verbose {
-                        println!("CALL @{target:#02x}");
+                        if self.addresses_as_integers {
+                            println!("CALL @{target}");
+                        } else {
+                            println!("CALL @{target:#02x}");
+                        }
                     }
 
                     self.push_stack(self.instruction_pointer)?;
@@ -1434,7 +1538,11 @@ impl<IO: HostIO> NativeCpu<IO> {
                     let return_address = self.pop_stack()?;
 
                     if self.verbose {
-                        println!("RET to @{return_address:#02x}");
+                        if self.addresses_as_integers {
+                            println!("RET to @{return_address}");
+                        } else {
+                            println!("RET to @{return_address:#02x}");
+                        }
                     }
 
                     self.instruction_pointer = return_address;
@@ -1456,7 +1564,11 @@ impl<IO: HostIO> NativeCpu<IO> {
                 Bytecode::Inspect => {
                     let addr = self.read_operand(self.instruction_pointer)?;
 
-                    println!("INSPECT @{:#02x} = {}", addr, self.read_memory(addr)?);
+                    if self.addresses_as_integers {
+                        println!("INSPECT @{} = {}", addr, self.read_memory(addr)?);
+                    } else {
+                        println!("INSPECT @{:#02x} = {}", addr, self.read_memory(addr)?);
+                    }
                 }
                 Bytecode::Halt => {
                     self.set_halted(true);
@@ -1477,6 +1589,9 @@ impl<IO: HostIO> NativeCpu<IO> {
     fn update_cycles(opcode: Bytecode) -> usize {
         match opcode {
             Bytecode::Nop
+            | Bytecode::LoadFromRegMemory
+            | Bytecode::StoreAtReg
+            | Bytecode::StoreValueAtReg
             | Bytecode::LoadValue
             | Bytecode::LoadMemory
             | Bytecode::LoadReg
