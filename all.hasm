@@ -3,57 +3,57 @@
         ; 0x00-0x0F: Memory & Stack
         nop                         ; do nothing
 
-        load R0, 42                 ; loadValue: R0 <- 42 (immediate)
-        load R1, @100              ; loadMemory: R1 <- memory[100]
-        load R2, R0                 ; loadReg: R2 <- R0
-        store @1001, R2             ; store: memory[101] <- R2
+        load R1, 42                 ; loadValue: R1 <- 42 (immediate)
+        load R2, @100              ; loadMemory: R2 <- memory[100]
+        load R3, R1                 ; loadReg: R3 <- R1
+        store @1001, R3             ; store: memory[101] <- R3
         push 123                    ; pushValue: push immediate 123 on stack
-        push R1                     ; pushReg: push contents of R1 on stack
-        pop R3                      ; pop: pop top of stack -> R3
+        push R2                     ; pushReg: push contents of R2 on stack
+        pop R4                      ; pop: pop top of stack -> R4
 
 ; --- 0x10-0x2F: Arithmetic (Integer + Float) ---
 
         ; Integer arithmetic
-        add R0, R3                  ; add: R0 = R0 + R3
-        add R3, 7                   ; addValue: R3 = R3 + 7
-        sub R3, R2                  ; sub: R3 = R3 - R2
-        sub R2, 10                  ; subValue: R2 = R2 - 10
-        mul R0, R3                  ; mul: R0 = R0 * R3  (32-bit wrap)
-        mul R3, 2                   ; mulValue: R3 = R3 * 2
-        div R0, R2                  ; div: R0 = R0 / R2  (integer division)
-        div R2, 2                   ; divValue: R2 = R2 / 2
+        add R1, R4                  ; add: R1 = R1 + R4
+        add R4, 7                   ; addValue: R4 = R4 + 7
+        sub R4, R3                  ; sub: R4 = R4 - R3
+        sub R3, 10                  ; subValue: R3 = R3 - 10
+        mul R1, R4                  ; mul: R1 = R1 * R4  (32-bit wrap)
+        mul R4, 2                   ; mulValue: R4 = R4 * 2
+        div R1, R3                  ; div: R1 = R1 / R3  (integer division)
+        div R3, 2                   ; divValue: R3 = R3 / 2
 
         ; Floating-point arithmetic
-        fadd R4, R5                 ; fadd: R4 = float(R4) + float(R5)
-        fadd R4, 3.14               ; faddValue: R4 = float(R4) + 3.14
-        fsub R5, R6                 ; fsub: R5 = float(R5) - float(R6)
-        fsub R5, 1.0                ; fsubValue: R5 = float(R5) - 1.0
-        fmul R4, R5                 ; fmul: R4 = float(R4) * float(R5)
-        fmul R4, 2.0                ; fmulValue: R4 = float(R4) * 2.0
-        fdiv R5, R4                 ; fdiv: R5 = float(R5) / float(R4)
-        fdiv R5, 2.0                ; fdivValue: R5 = float(R5) / 2.0
+        fadd R5, R6                 ; fadd: R5 = float(R5) + float(R6)
+        fadd R5, 3.14               ; faddValue: R5 = float(R5) + 3.14
+        fsub R6, R7                 ; fsub: R6 = float(R6) - float(R7)
+        fsub R6, 1.0                ; fsubValue: R6 = float(R6) - 1.0
+        fmul R5, R6                 ; fmul: R5 = float(R5) * float(R6)
+        fmul R5, 2.0                ; fmulValue: R5 = float(R5) * 2.0
+        fdiv R6, R5                 ; fdiv: R6 = float(R6) / float(R5)
+        fdiv R6, 2.0                ; fdivValue: R6 = float(R6) / 2.0
 
 ; --- 0x70-0x7F: Bitwise / Logical ---
 
-        and R0, R1                  ; R0 = R0 & R1
-        and R0, 0xFF                ; R0 = R0 & 0xFF
-        or R1, R2                   ; R1 = R1 | R2
-        or R1, 0x00FF               ; R1 = R1 | 0x00FF
-        xor R0, R3                  ; R0 = R0 ^ R3
-        xor R0, 0x1234              ; R0 = R0 ^ 0x1234
-        not R0                      ; R0 = ~R0
+        and R1, R2                  ; R1 = R1 & R2
+        and R1, 0xFF                ; R1 = R1 & 0xFF
+        or R2, R3                   ; R2 = R2 | R3
+        or R2, 0x00FF               ; R2 = R2 | 0x00FF
+        xor R1, R4                  ; R1 = R1 ^ R4
+        xor R1, 0x1234              ; R1 = R1 ^ 0x1234
+        not R1                      ; R1 = ~R1
 
 ; --- 0xB0-0xBF: Byte-level memory ---
 
-        loadbyte R6, @2002          ; R6 = memory[202*4] as u8
-        storebyte @2003, R6         ; memory[203*4] = (R6 & 0xFF)
+        loadbyte R7, @2002          ; R7 = memory[202*4] as u8
+        storebyte @2003, R7         ; memory[203*4] = (R7 & 0xFF)
 
 ; --- 0xC00 - Comparisons & Conditional Jumps ---
 
-        cmp R0, R1                  ; set flags based on (R0 - R1)
-        cmp R0, 42                  ; set flags based on (R0 - 42)
-        fcmp R4, R5                 ; set float flags based on (R4 - R5)
-        fcmp R4, 1.25               ; set float flags based on (R4 - 1.25)
+        cmp R1, R2                  ; set flags based on (R1 - R2)
+        cmp R1, 42                  ; set flags based on (R1 - 42)
+        fcmp R5, R6                 ; set float flags based on (R5 - R6)
+        fcmp R5, 1.25               ; set float flags based on (R5 - 1.25)
 
         jmp  @label_unconditional    ; Unconditional jump
 
@@ -84,14 +84,14 @@ label_compare:
 ; --- 0xF0 - 0xF2: Call / Return / Syscall ---
 label_unconditional:
         call @subroutine             ; push IP+1, jump to 'subroutine'
-        syscall                     ; invoke host IO (R0 often holds syscall code)
+        syscall                     ; invoke host IO (R1 often holds syscall code)
         inspect @200               ; debugging: print memory[200]
         halt
 
 ; A small subroutine:
 subroutine:
         ; do something minimal
-        load R7, 999                ; loadValue: R7 <- 999
+        load R8, 999                ; loadValue: R8 <- 999
         ret
 
 ; --- All condition labels (mostly empty for this demo) ---

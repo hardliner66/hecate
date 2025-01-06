@@ -37,13 +37,12 @@
                 ],
                 "filter": {
                     "name": "hasm",
-                    "kind": "bin"
+                    "kind": "test"
                 }
             },
             "args": [
-                "-d",
-                "out.bin",
-                "./out.hasm"
+                "deleteme.hasm",
+                "deleteme.bin"
             ],
             "cwd": "${workspaceFolder}"
         }

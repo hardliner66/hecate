@@ -1,40 +1,40 @@
     nop
-    load R0, 42
-    load R1, @100
-    load R2, R0
-    store @101, R2
+    load R1, 42
+    load R2, @100
+    load R3, R1
+    store @101, R3
     push 123
-    push R1
-    pop R3
-    add R0, R3
-    add R3, 7
-    sub R3, R2
-    sub R2, 10
-    mul R0, R3
-    mul R3, 2
-    div R0, R2
-    div R2, 2
-    fadd R4, R5
-    fadd R4, 3.14
-    fsub R5, R6
-    fsub R5, 1
-    fmul R4, R5
-    fmul R4, 2
-    fdiv R5, R4
-    fdiv R5, 2
-    and R0, R1
-    and R0, 255
-    or R1, R2
-    or R1, 255
-    xor R0, R3
-    xor R0, 4660
-    not R0
-    loadbyte R6, @202
-    storebyte @203, R6
-    cmp R0, R1
-    cmp R0, 42
-    fcmp R4, R5
-    fcmp R4, 1.25
+    push R2
+    pop R4
+    add R1, R4
+    add R4, 7
+    sub R4, R3
+    sub R3, 10
+    mul R1, R4
+    mul R4, 2
+    div R1, R3
+    div R3, 2
+    fadd R5, R6
+    fadd R5, 3.14
+    fsub R6, R7
+    fsub R6, 1
+    fmul R5, R6
+    fmul R5, 2
+    fdiv R6, R5
+    fdiv R6, 2
+    and R1, R2
+    and R1, 255
+    or R2, R3
+    or R2, 255
+    xor R1, R4
+    xor R1, 4660
+    not R1
+    loadbyte R7, @202
+    storebyte @203, R7
+    cmp R1, R2
+    cmp R1, 42
+    fcmp R5, R6
+    fcmp R5, 1.25
     jmp @label_unconditional
 label_compare:
     je @label_sign
@@ -60,7 +60,7 @@ label_unconditional:
     inspect @200
     halt
 subroutine:
-    load R7, 999
+    load R8, 999
     ret
 label_sign:
     ret

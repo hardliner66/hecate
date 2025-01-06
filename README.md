@@ -9,6 +9,7 @@ This project provides an implementation of the Hecate virtual machine.
   - [Prerequisites](#prerequisites)
 - [Usage](#usage)
 - [Performance Tracking](#performance-tracking)
+- [Registers](#registers)
 - [Bytecode Instruction Set](#bytecode-instruction-set)
 - [Caches and Memory Access](#caches-and-memory-access)
   - [Caches](#caches)
@@ -90,6 +91,13 @@ The CPU tracks performance using the following stats:
 | Cycles                        | Cumulative score based on average number of cycles[^1]. This includes cycle count for all executed instructions as well as for every memory access. |
 | Memory Access Count           | The total amount memory is requested from an address. This includes values that are already cached.                                                 |
 | Cache hits (L1D, L1I, L2, L3) | How often each cache was hit.                                                                                                                       |
+
+---
+## Registers
+When used as a library, the CPU can be instantiated with as many registers as desired.
+
+When using the pre-made binary, the CPU has 31 general purpose registers. R1-R31.
+There is als a register called R0 which ignores writes and will always return 0.
 
 ---
 ## Bytecode Instruction Set

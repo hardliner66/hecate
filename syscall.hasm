@@ -11,7 +11,7 @@ store @1009, 114
 store @1010, 108
 store @1011, 100
 store @1012, 33
-load R0, 0
+load R1, 0
 load r1, 1000
 load r2, 13
 syscall

@@ -103,7 +103,7 @@ impl Assembler {
             }
             ExpectedOperandType::MemoryAddress => {
                 let addr = if let Some(operand) = operand.strip_prefix('@') {
-                    operand[1..]
+                    operand
                         .parse::<u32>()
                         .map_err(|_| AssemblerError::InvalidImmediate(operand.to_string()))?
                 } else {
@@ -112,10 +112,11 @@ impl Assembler {
                 Ok(ParsedOperand::Address(addr))
             }
             ExpectedOperandType::LabelOrAddress => {
-                if !operand.starts_with('@') {
-                    return Err(AssemblerError::InvalidLabel(operand.to_string()));
-                }
-                let label_or_addr = &operand[1..];
+                let label_or_addr = if let Some(operand) = operand.strip_prefix('@') {
+                    operand
+                } else {
+                    return Err(AssemblerError::InvalidImmediate(operand.to_string()));
+                };
                 if let Some(&addr) = self.labels.get(label_or_addr) {
                     Ok(ParsedOperand::Address(addr))
                 } else if let Ok(addr) = label_or_addr.parse::<u32>() {
@@ -192,9 +193,17 @@ impl Assembler {
                 .map(|a| {
                     if a.to_uppercase().starts_with("R") {
                         Ok(OperandType::Register)
-                    } else if a.starts_with("@") && a[1..].parse::<u32>().is_ok() {
+                    } else if a
+                        .strip_prefix("@")
+                        .map(|a| a.parse::<u32>().is_ok())
+                        .unwrap_or_default()
+                    {
                         Ok(OperandType::MemoryAddress)
-                    } else if a.starts_with("@") && a[1..].is_ascii() {
+                    } else if a
+                        .strip_prefix("@")
+                        .map(|a| a.is_ascii())
+                        .unwrap_or_default()
+                    {
                         Ok(OperandType::Label)
                     } else if (if let Some(a) = a.strip_prefix("0x") {
                         i32::from_str_radix(a, 16)
@@ -406,8 +415,8 @@ mod tests {
         let mut assembler = Assembler::new();
         let program = "\
             start:\n\
-            load r0, 42\n\
-            add r0, 10\n\
+            load r1, 42\n\
+            add r1, 10\n\
             jmp @start\
         ";
         let result = assembler.assemble_program(program).unwrap();
@@ -419,37 +428,37 @@ mod tests {
     fn test_simple_disassembly() {
         let bytecode = vec![
             Bytecode::LoadValue as u32,
-            0,
+            1,
             42,
             Bytecode::AddValue as u32,
-            0,
+            1,
             10,
         ];
         let disassembler = Disassembler::new();
         let result = disassembler.disassemble_program(&bytecode).unwrap();
-        assert!(result.to_lowercase().contains("load r0, 42"));
-        assert!(result.to_lowercase().contains("add r0, 10"));
+        assert!(result.to_lowercase().contains("load r1, 42"));
+        assert!(result.to_lowercase().contains("add r1, 10"));
     }
 
     #[test]
     fn test_memory_addressing() {
         let mut assembler = Assembler::new();
-        let program = "load r0, @1234\nstore @1234, r0";
+        let program = "load r1, @1234\nstore @1234, r1";
         let bytecode = assembler.assemble_program(program).unwrap();
         let disassembler = Disassembler::from_bytecode_file(&bytecode);
         let result = disassembler.disassemble_program(&bytecode.data).unwrap();
-        assert!(result.to_lowercase().contains("load r0, @1234"));
-        assert!(result.to_lowercase().contains("store @1234, r0"));
+        assert!(result.to_lowercase().contains("load r1, @1234"));
+        assert!(result.to_lowercase().contains("store @1234, r1"));
     }
 
     #[test]
     fn test_roundtrip() {
-        let program = "start:\nload r0, 42\nadd r0, 10\n jmp @start\n";
+        let program = "start:\nload r1, 42\nadd r1, 10\n jmp @start\n";
         let mut assembler = Assembler::new();
         let bytecode = assembler.assemble_program(program).unwrap();
         let disassembler = Disassembler::from_bytecode_file(&bytecode);
         let result = disassembler.disassemble_program(&bytecode.data).unwrap();
-        let expected = "start:\n    load r0, 42\n    add r0, 10\n    jmp @start\n";
+        let expected = "start:\n    load r1, 42\n    add r1, 10\n    jmp @start\n";
         assert_eq!(result.to_uppercase(), expected.to_uppercase());
     }
 }

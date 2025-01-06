@@ -654,6 +654,20 @@ impl<IO: HostIO> NativeCpu<IO> {
         self.flags.carry = false;
     }
 
+    fn write_register(&mut self, reg: u32, value: u32) {
+        if reg != 0 {
+            self.registers[reg as usize] = value;
+        }
+    }
+
+    fn read_register(&self, reg: u32) -> u32 {
+        if reg != 0 {
+            self.registers[reg as usize]
+        } else {
+            0
+        }
+    }
+
     fn run(&mut self, cycles: isize) -> Result<CpuStats, ExecutionError> {
         let mut executed = 0;
 
@@ -680,7 +694,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                         println!("LOAD R{}, {}", reg, imm);
                     }
 
-                    self.registers[reg as usize] = imm;
+                    self.write_register(reg, imm);
                     self.stats.cycles += 1;
                 }
                 Bytecode::LoadMemory => {
@@ -694,7 +708,8 @@ impl<IO: HostIO> NativeCpu<IO> {
                         println!("LOAD R{}, @{:#02x}", reg, addr);
                     }
 
-                    self.registers[reg as usize] = self.read_memory(addr)?;
+                    let value = self.read_memory(addr)?;
+                    self.write_register(reg, value);
                     self.stats.cycles += 1;
                 }
                 Bytecode::LoadReg => {
@@ -708,7 +723,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                         println!("LOAD R{}, R{}", reg1, reg2);
                     }
 
-                    self.registers[reg1 as usize] = self.registers[reg2 as usize];
+                    self.write_register(reg1, self.read_register(reg2));
                     self.stats.cycles += 1;
                 }
                 Bytecode::Store => {
@@ -722,7 +737,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                         println!("STORE @{:#02x}, R{}", addr, reg);
                     }
 
-                    self.write_memory(addr, self.registers[reg as usize])?;
+                    self.write_memory(addr, self.read_register(reg))?;
                     self.stats.cycles += 1;
                 }
                 Bytecode::StoreValue => {
@@ -758,7 +773,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                         println!("PUSH R{}", reg);
                     }
 
-                    let val = self.registers[reg as usize];
+                    let val = self.read_register(reg);
 
                     self.push_stack(val)?;
                     self.stats.cycles += 1;
@@ -771,7 +786,8 @@ impl<IO: HostIO> NativeCpu<IO> {
                         println!("POP R{}", reg);
                     }
 
-                    self.registers[reg as usize] = self.pop_stack()?;
+                    let value = self.pop_stack()?;
+                    self.write_register(reg, value);
                     self.stats.cycles += 1;
                 }
                 Bytecode::And => {
@@ -781,15 +797,15 @@ impl<IO: HostIO> NativeCpu<IO> {
                     let reg2 = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
-                    let a = self.registers[reg1 as usize];
-                    let b = self.registers[reg2 as usize];
+                    let a = self.read_register(reg1);
+                    let b = self.read_register(reg2);
                     let result = a & b;
 
                     if self.verbose {
                         println!("AND R{}({}), R{}({}) => {}", reg1, a, reg2, b, result);
                     }
 
-                    self.registers[reg1 as usize] = result;
+                    self.write_register(reg1, result);
                     self.update_flags_and(a, b, result);
                     self.stats.cycles += 1;
                 }
@@ -800,7 +816,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     let imm = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
-                    let a = self.registers[reg as usize];
+                    let a = self.read_register(reg);
                     let b = imm;
                     let result = a & b;
 
@@ -808,7 +824,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                         println!("AND R{}({}), {} => {}", reg, a, b, result);
                     }
 
-                    self.registers[reg as usize] = result;
+                    self.write_register(reg, result);
                     self.update_flags_and(a, b, result);
                     self.stats.cycles += 1;
                 }
@@ -819,15 +835,15 @@ impl<IO: HostIO> NativeCpu<IO> {
                     let reg2 = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
-                    let a = self.registers[reg1 as usize];
-                    let b = self.registers[reg2 as usize];
+                    let a = self.read_register(reg1);
+                    let b = self.read_register(reg2);
                     let result = a | b;
 
                     if self.verbose {
                         println!("OR R{}({}), R{}({}) => {}", reg1, a, reg2, b, result);
                     }
 
-                    self.registers[reg1 as usize] = result;
+                    self.write_register(reg1, result);
                     self.update_flags_or(a, b, result);
                     self.stats.cycles += 1;
                 }
@@ -838,7 +854,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     let imm = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
-                    let a = self.registers[reg as usize];
+                    let a = self.read_register(reg);
                     let b = imm;
                     let result = a | b;
 
@@ -846,7 +862,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                         println!("OR R{}({}), {} => {}", reg, a, b, result);
                     }
 
-                    self.registers[reg as usize] = result;
+                    self.write_register(reg, result);
                     self.update_flags_or(a, b, result);
                     self.stats.cycles += 1;
                 }
@@ -857,15 +873,15 @@ impl<IO: HostIO> NativeCpu<IO> {
                     let reg2 = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
-                    let a = self.registers[reg1 as usize];
-                    let b = self.registers[reg2 as usize];
+                    let a = self.read_register(reg1);
+                    let b = self.read_register(reg2);
                     let result = a ^ b;
 
                     if self.verbose {
                         println!("XOR R{}({}), R{}({}) => {}", reg1, a, reg2, b, result);
                     }
 
-                    self.registers[reg1 as usize] = result;
+                    self.write_register(reg1, result);
                     self.update_flags_xor(a, b, result);
                     self.stats.cycles += 1;
                 }
@@ -876,7 +892,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     let imm = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
-                    let a = self.registers[reg as usize];
+                    let a = self.read_register(reg);
                     let b = imm;
                     let result = a ^ b;
 
@@ -884,22 +900,22 @@ impl<IO: HostIO> NativeCpu<IO> {
                         println!("XOR R{}({}), {} => {}", reg, a, b, result);
                     }
 
-                    self.registers[reg as usize] = result;
+                    self.write_register(reg, result);
                     self.update_flags_xor(a, b, result);
                     self.stats.cycles += 1;
                 }
                 Bytecode::Not => {
-                    let reg1 = self.read_memory(self.instruction_pointer)?;
+                    let reg = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
-                    let a = self.registers[reg1 as usize];
+                    let a = self.read_register(reg);
                     let result = !a;
 
                     if self.verbose {
-                        println!("NOT R{}({}) => {}", reg1, a, result);
+                        println!("NOT R{}({}) => {}", reg, a, result);
                     }
 
-                    self.registers[reg1 as usize] = result;
+                    self.write_register(reg, result);
                     self.update_flags_not(a, result);
                     self.stats.cycles += 1;
                 }
@@ -910,15 +926,15 @@ impl<IO: HostIO> NativeCpu<IO> {
                     let reg2 = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
-                    let a = self.registers[reg1 as usize];
-                    let b = self.registers[reg2 as usize];
+                    let a = self.read_register(reg1);
+                    let b = self.read_register(reg2);
                     let result = a.wrapping_add(b);
 
                     if self.verbose {
                         println!("ADD R{}({}), R{}({}) => {}", reg1, a, reg2, b, result);
                     }
 
-                    self.registers[reg1 as usize] = result;
+                    self.write_register(reg1, result);
                     self.update_flags_add(a, b, result);
                     self.stats.cycles += 1;
                 }
@@ -929,7 +945,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     let imm = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
-                    let a = self.registers[reg as usize];
+                    let a = self.read_register(reg);
                     let b = imm;
                     let result = a.wrapping_add(b);
 
@@ -937,7 +953,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                         println!("ADD R{}({}), {} => {}", reg, a, b, result);
                     }
 
-                    self.registers[reg as usize] = result;
+                    self.write_register(reg, result);
                     self.update_flags_add(a, b, result);
                     self.stats.cycles += 1;
                 }
@@ -948,15 +964,15 @@ impl<IO: HostIO> NativeCpu<IO> {
                     let reg2 = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
-                    let a = f32::from_bits(self.registers[reg1 as usize]);
-                    let b = f32::from_bits(self.registers[reg2 as usize]);
+                    let a = f32::from_bits(self.read_register(reg1));
+                    let b = f32::from_bits(self.read_register(reg2));
                     let result = a + b;
 
                     if self.verbose {
                         println!("FADD R{}({}), R{}({}) => {}", reg1, a, reg2, b, result);
                     }
 
-                    self.registers[reg1 as usize] = result.to_bits();
+                    self.write_register(reg1, result.to_bits());
                     self.update_flags_float(a, b);
                     self.stats.cycles += 2;
                 }
@@ -967,7 +983,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     let imm = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
-                    let a = f32::from_bits(self.registers[reg as usize]);
+                    let a = f32::from_bits(self.read_register(reg));
                     let b = f32::from_bits(imm);
                     let result = a + b;
 
@@ -975,7 +991,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                         println!("FADD R{}({}), {} => {}", reg, a, b, result);
                     }
 
-                    self.registers[reg as usize] = result.to_bits();
+                    self.write_register(reg, result.to_bits());
                     self.update_flags_float(a, b);
                     self.stats.cycles += 2;
                 }
@@ -986,15 +1002,15 @@ impl<IO: HostIO> NativeCpu<IO> {
                     let reg2 = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
-                    let a = self.registers[reg1 as usize];
-                    let b = self.registers[reg2 as usize];
+                    let a = self.read_register(reg1);
+                    let b = self.read_register(reg2);
                     let result = a.wrapping_sub(b);
 
                     if self.verbose {
                         println!("SUB R{}({}), R{}({}) => {}", reg1, a, reg2, b, result);
                     }
 
-                    self.registers[reg1 as usize] = result;
+                    self.write_register(reg1, result);
                     self.update_flags_sub(a, b, result);
                     self.stats.cycles += 1;
                 }
@@ -1005,7 +1021,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     let imm = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
-                    let a = self.registers[reg as usize];
+                    let a = self.read_register(reg);
                     let b = imm;
                     let result = a.wrapping_sub(b);
 
@@ -1013,7 +1029,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                         println!("SUB R{}({}), {} => {}", reg, a, b, result);
                     }
 
-                    self.registers[reg as usize] = result;
+                    self.write_register(reg, result);
                     self.update_flags_sub(a, b, result);
                     self.stats.cycles += 1;
                 }
@@ -1024,15 +1040,15 @@ impl<IO: HostIO> NativeCpu<IO> {
                     let reg2 = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
-                    let a = f32::from_bits(self.registers[reg1 as usize]);
-                    let b = f32::from_bits(self.registers[reg2 as usize]);
+                    let a = f32::from_bits(self.read_register(reg1));
+                    let b = f32::from_bits(self.read_register(reg2));
                     let result = a - b;
 
                     if self.verbose {
                         println!("FSUB R{}({}), R{}({}) => {}", reg1, a, reg2, b, result);
                     }
 
-                    self.registers[reg1 as usize] = result.to_bits();
+                    self.write_register(reg1, result.to_bits());
                     self.update_flags_float(a, b);
                     self.stats.cycles += 2;
                 }
@@ -1043,7 +1059,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     let imm = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
-                    let a = f32::from_bits(self.registers[reg as usize]);
+                    let a = f32::from_bits(self.read_register(reg));
                     let b = f32::from_bits(imm);
                     let result = a - b;
 
@@ -1051,7 +1067,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                         println!("FSUB R{}({}), {} => {}", reg, a, b, result);
                     }
 
-                    self.registers[reg as usize] = result.to_bits();
+                    self.write_register(reg, result.to_bits());
                     self.update_flags_float(a, b);
                     self.stats.cycles += 2;
                 }
@@ -1062,8 +1078,8 @@ impl<IO: HostIO> NativeCpu<IO> {
                     let reg2 = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
-                    let a = self.registers[reg1 as usize];
-                    let b = self.registers[reg2 as usize];
+                    let a = self.read_register(reg1);
+                    let b = self.read_register(reg2);
 
                     let wide_result = (a as u64).wrapping_mul(b as u64);
                     let result = wide_result as u32;
@@ -1072,7 +1088,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                         println!("MUL R{}({}), R{}({}) => {}", reg1, a, reg2, b, result);
                     }
 
-                    self.registers[reg1 as usize] = result;
+                    self.write_register(reg1, result);
                     self.update_flags_mul(a, b, wide_result);
 
                     self.stats.cycles += 4;
@@ -1084,7 +1100,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     let imm = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
-                    let a = self.registers[reg as usize];
+                    let a = self.read_register(reg);
                     let b = imm;
 
                     let wide_result = (a as u64).wrapping_mul(b as u64);
@@ -1094,7 +1110,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                         println!("MUL R{}({}), {} => {}", reg, a, b, result);
                     }
 
-                    self.registers[reg as usize] = result;
+                    self.write_register(reg, result);
                     self.update_flags_mul(a, b, wide_result);
 
                     self.stats.cycles += 4;
@@ -1106,15 +1122,15 @@ impl<IO: HostIO> NativeCpu<IO> {
                     let reg2 = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
-                    let a = f32::from_bits(self.registers[reg1 as usize]);
-                    let b = f32::from_bits(self.registers[reg2 as usize]);
+                    let a = f32::from_bits(self.read_register(reg1));
+                    let b = f32::from_bits(self.read_register(reg2));
                     let result = a * b;
 
                     if self.verbose {
                         println!("FMUL R{}({}), R{}({}) => {}", reg1, a, reg2, b, result);
                     }
 
-                    self.registers[reg1 as usize] = result.to_bits();
+                    self.write_register(reg1, result.to_bits());
                     self.update_flags_float(a, b);
                     self.stats.cycles += 4;
                 }
@@ -1125,7 +1141,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     let imm = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
-                    let a = f32::from_bits(self.registers[reg as usize]);
+                    let a = f32::from_bits(self.read_register(reg));
                     let b = f32::from_bits(imm);
                     let result = a * b;
 
@@ -1133,7 +1149,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                         println!("FMUL R{}({}), {} => {}", reg, a, b, result);
                     }
 
-                    self.registers[reg as usize] = result.to_bits();
+                    self.write_register(reg, result.to_bits());
                     self.update_flags_float(a, b);
                     self.stats.cycles += 4;
                 }
@@ -1144,8 +1160,8 @@ impl<IO: HostIO> NativeCpu<IO> {
                     let reg2 = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
-                    let a = self.registers[reg1 as usize];
-                    let b = self.registers[reg2 as usize];
+                    let a = self.read_register(reg1);
+                    let b = self.read_register(reg2);
 
                     if b == 0 {
                         return Err(ExecutionError::DivisionByZero);
@@ -1157,7 +1173,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                         println!("DIV R{}({}), R{}({}) => {}", reg1, a, reg2, b, result);
                     }
 
-                    self.registers[reg1 as usize] = result;
+                    self.write_register(reg1, result);
                     self.update_flags_div(a, b, result);
 
                     self.stats.cycles += 27;
@@ -1169,7 +1185,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     let imm = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
-                    let a = self.registers[reg as usize];
+                    let a = self.read_register(reg);
                     let b = imm;
 
                     if b == 0 {
@@ -1182,7 +1198,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                         println!("DIV R{}({}), {} => {}", reg, a, b, result);
                     }
 
-                    self.registers[reg as usize] = result;
+                    self.write_register(reg, result);
                     self.update_flags_div(a, b, result);
 
                     self.stats.cycles += 27;
@@ -1194,8 +1210,8 @@ impl<IO: HostIO> NativeCpu<IO> {
                     let reg2 = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
-                    let a = f32::from_bits(self.registers[reg1 as usize]);
-                    let b = f32::from_bits(self.registers[reg2 as usize]);
+                    let a = f32::from_bits(self.read_register(reg1));
+                    let b = f32::from_bits(self.read_register(reg2));
 
                     if b == 0.0 {
                         return Err(ExecutionError::DivisionByZero);
@@ -1207,7 +1223,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                         println!("FDIV R{}({}), R{}({}) => {}", reg1, a, reg2, b, result);
                     }
 
-                    self.registers[reg1 as usize] = result.to_bits();
+                    self.write_register(reg1, result.to_bits());
                     self.update_flags_float(a, b);
                     self.stats.cycles += 27;
                 }
@@ -1218,7 +1234,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     let imm = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
-                    let a = f32::from_bits(self.registers[reg as usize]);
+                    let a = f32::from_bits(self.read_register(reg));
                     let b = f32::from_bits(imm);
 
                     if b == 0.0 {
@@ -1231,7 +1247,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                         println!("FDIV R{}({}), {} => {}", reg, a, b, result);
                     }
 
-                    self.registers[reg as usize] = result.to_bits();
+                    self.write_register(reg, result.to_bits());
                     self.update_flags_float(a, b);
                     self.stats.cycles += 27;
                 }
@@ -1243,7 +1259,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     self.instruction_pointer += 1;
 
                     let byte = self.read_byte(addr)?;
-                    self.registers[reg as usize] = byte as u32;
+                    self.write_register(reg, byte as u32);
                     self.stats.cycles += 2;
                 }
 
@@ -1254,7 +1270,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     let reg = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
-                    let value = (self.registers[reg as usize] & 0xFF) as u8;
+                    let value = (self.read_register(reg) & 0xFF) as u8;
                     self.write_byte(addr, value)?;
                     self.stats.cycles += 2;
                 }
@@ -1265,8 +1281,8 @@ impl<IO: HostIO> NativeCpu<IO> {
                     let reg2 = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
-                    let a = self.registers[reg1 as usize];
-                    let b = self.registers[reg2 as usize];
+                    let a = self.read_register(reg1);
+                    let b = self.read_register(reg2);
 
                     let result = a.wrapping_sub(b);
 
@@ -1289,7 +1305,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     let imm = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
-                    let a = self.registers[reg as usize];
+                    let a = self.read_register(reg);
                     let b = imm;
 
                     let result = a.wrapping_sub(b);
@@ -1312,8 +1328,8 @@ impl<IO: HostIO> NativeCpu<IO> {
                     let reg2 = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
-                    let a = f32::from_bits(self.registers[reg1 as usize]);
-                    let b = f32::from_bits(self.registers[reg2 as usize]);
+                    let a = f32::from_bits(self.read_register(reg1));
+                    let b = f32::from_bits(self.read_register(reg2));
 
                     if self.verbose {
                         println!(
@@ -1333,7 +1349,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     let imm = self.read_memory(self.instruction_pointer)?;
                     self.instruction_pointer += 1;
 
-                    let a = f32::from_bits(self.registers[reg as usize]);
+                    let a = f32::from_bits(self.read_register(reg));
                     let b = f32::from_bits(imm);
 
                     if self.verbose {
@@ -1413,7 +1429,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     self.stats.cycles += 5;
                 }
                 Bytecode::Syscall => {
-                    let code = self.registers[0];
+                    let code = self.read_register(1);
                     if self.verbose {
                         println!("SYSCALL code={}", code);
                     }
@@ -1495,32 +1511,32 @@ mod tests {
     fn test_load_value() {
         let program = &[
             Bytecode::LoadValue as u32,
-            0,  // R0
+            1,  // R1
             42, // value
             Bytecode::Halt as u32,
         ];
 
         let cpu = run_program(program, 128, 4);
-        assert_eq!(cpu.get_registers()[0], 42);
+        assert_eq!(cpu.get_registers()[1], 42);
     }
 
     #[test]
     fn test_add() {
         let program = &[
             Bytecode::LoadValue as u32,
-            0,
-            5, // R0 = 5
-            Bytecode::LoadValue as u32,
             1,
-            10, // R1 = 10
+            5, // R1 = 5
+            Bytecode::LoadValue as u32,
+            2,
+            10, // R2 = 10
             Bytecode::Add as u32,
-            0,
-            1, // R0 = R0 + R1
+            1,
+            2, // R1 = R1 + R2
             Bytecode::Halt as u32,
         ];
 
         let cpu = run_program(program, 128, 4);
-        assert_eq!(cpu.get_registers()[0], 15);
+        assert_eq!(cpu.get_registers()[1], 15);
         assert!(!cpu.flags.zero);
     }
 
@@ -1528,19 +1544,19 @@ mod tests {
     fn test_sub() {
         let program = &[
             Bytecode::LoadValue as u32,
-            0,
-            10, // R0 = 10
-            Bytecode::LoadValue as u32,
             1,
-            5, // R1 = 5
+            10, // R1 = 10
+            Bytecode::LoadValue as u32,
+            2,
+            5, // R2 = 5
             Bytecode::Sub as u32,
-            0,
-            1, // R0 = R0 - R1 (10-5 =5)
+            1,
+            2, // R1 = R1 - R2 (10-5 =5)
             Bytecode::Halt as u32,
         ];
 
         let cpu = run_program(program, 128, 4);
-        assert_eq!(cpu.get_registers()[0], 5);
+        assert_eq!(cpu.get_registers()[1], 5);
         assert!(!cpu.flags.zero);
         assert!(!cpu.flags.sign);
     }
@@ -1549,67 +1565,75 @@ mod tests {
     fn test_mul() {
         let program = &[
             Bytecode::LoadValue as u32,
-            0,
-            6, // R0 = 6
-            Bytecode::LoadValue as u32,
             1,
-            7, // R1 = 7
+            6, // R1 = 6
+            Bytecode::LoadValue as u32,
+            2,
+            7, // R2 = 7
             Bytecode::Mul as u32,
-            0,
-            1, // R0 = R0 * R1 (6*7=42)
+            1,
+            2, // R1 = R1 * R2 (6*7=42)
             Bytecode::Halt as u32,
         ];
 
         let cpu = run_program(program, 128, 4);
-        assert_eq!(cpu.get_registers()[0], 42);
+        assert_eq!(cpu.get_registers()[1], 42);
     }
 
     #[test]
     fn test_div() {
         let program = &[
             Bytecode::LoadValue as u32,
-            0,
+            1,
             42,
             Bytecode::LoadValue as u32,
-            1,
+            2,
             6,
             Bytecode::Div as u32,
-            0,
-            1, // R0 = R0 / R1 = 42/6 =7
+            1,
+            2, // R1 = R1 / R2 = 42/6 =7
             Bytecode::Halt as u32,
         ];
 
         let cpu = run_program(program, 128, 4);
-        assert_eq!(cpu.get_registers()[0], 7);
+        assert_eq!(cpu.get_registers()[1], 7);
+    }
+
+    #[test]
+    fn test_write_r0() {
+        let program = &[Bytecode::LoadValue as u32, 0, 42, Bytecode::Halt as u32];
+
+        let cpu = run_program(program, 128, 4);
+        assert_eq!(cpu.get_registers()[0], 0);
     }
 
     #[test]
     fn test_cmp_je() {
         let program = &[
             Bytecode::LoadValue as u32,
-            0,
+            1,
             5,
             Bytecode::LoadValue as u32,
-            1,
+            2,
             5,
             Bytecode::Cmp as u32,
-            0,
             1,
+            2,
             Bytecode::Je as u32,
             15,
             Bytecode::LoadValue as u32,
-            2,
-            100, // If not equal, R2=100
+            3,
+            100, // If not equal, R3=100
             Bytecode::Halt as u32,
             // Jump target (index 15):
             Bytecode::LoadValue as u32,
-            2,
+            3,
             999,
             Bytecode::Halt as u32,
         ];
 
         let cpu = run_program(program, 128, 4);
-        assert_eq!(cpu.get_registers()[2], 999);
+        assert_eq!(cpu.get_registers()[3], 999);
     }
 
     #[test]
@@ -1618,43 +1642,43 @@ mod tests {
             Bytecode::PushValue as u32,
             42, // Push 42 on stack
             Bytecode::Pop as u32,
-            0, // Pop into R0 => R0=42
+            1, // Pop into R1 => R1=42
             Bytecode::PushValue as u32,
             10, // push 10
             Bytecode::PushValue as u32,
             20, // push 20
             Bytecode::Pop as u32,
-            1, // pop into R1 => R1=20
+            2, // pop into R2 => R2=20
             Bytecode::Pop as u32,
-            2, // pop into R2 => R2=10
+            3, // pop into R3 => R3=10
             Bytecode::Halt as u32,
         ];
 
         let cpu = run_program(program, 128, 4);
         let registers = cpu.get_registers();
-        assert_eq!(registers[0], 42);
-        assert_eq!(registers[1], 20);
-        assert_eq!(registers[2], 10);
+        assert_eq!(registers[1], 42);
+        assert_eq!(registers[2], 20);
+        assert_eq!(registers[3], 10);
     }
 
     #[test]
     fn test_store_load_memory() {
         let program = &[
             Bytecode::LoadValue as u32,
-            0,
-            123, // R0=123
+            1,
+            123, // R1=123
             Bytecode::Store as u32,
             50,
-            0, // memory[50]=R0=123
+            1, // memory[50]=R1=123
             Bytecode::LoadMemory as u32,
-            1,
-            50, // R1=memory[50] = 123
+            2,
+            50, // R2=memory[50] = 123
             Bytecode::Halt as u32,
         ];
 
         let cpu = run_program(program, 128, 4);
         let registers = cpu.get_registers();
-        assert_eq!(registers[1], 123);
+        assert_eq!(registers[2], 123);
         assert_eq!(cpu.get_memory()[50], 123);
     }
 
@@ -1669,8 +1693,8 @@ mod tests {
             code: u32,
             cpu: &mut NativeCpu<Self>,
         ) -> Result<usize, ExecutionError> {
-            let arg1 = cpu.registers.get(1).copied().unwrap_or(0);
-            let arg2 = cpu.registers.get(2).copied().unwrap_or(0);
+            let arg1 = cpu.registers.get(2).copied().unwrap_or(0);
+            let arg2 = cpu.registers.get(3).copied().unwrap_or(0);
             self.calls.push((code, arg1, arg2));
             Ok(0)
         }
@@ -1692,14 +1716,14 @@ mod tests {
     fn test_syscall() {
         let program = &[
             Bytecode::LoadValue as u32,
-            0,
-            1, // R0=1 (syscall code)
-            Bytecode::LoadValue as u32,
             1,
-            123, // R1=123
+            1, // R1=1 (syscall code)
             Bytecode::LoadValue as u32,
             2,
-            456, // R2=456
+            123, // R2=123
+            Bytecode::LoadValue as u32,
+            3,
+            456, // R3=456
             Bytecode::Syscall as u32,
             Bytecode::Halt as u32,
         ];
@@ -1714,29 +1738,29 @@ mod tests {
     fn test_load_store_byte() {
         let program = &[
             Bytecode::LoadValue as u32,
-            0,
-            42, // R0=42
+            1,
+            42, // R1=42
             Bytecode::StoreByte as u32,
             10,
-            0, // memory[10*4]=42
+            1, // memory[10*4]=42
             Bytecode::LoadByte as u32,
-            1,
-            10, // R1 = memory[10*4]
+            2,
+            10, // R2 = memory[10*4]
             Bytecode::Halt as u32,
         ];
 
         let cpu = run_program(program, 1024, 8);
 
-        assert_eq!(cpu.get_registers()[1], 42);
+        assert_eq!(cpu.get_registers()[2], 42);
     }
 
     #[test]
     fn test_load_float() {
         let f_val = 1.5f32.to_bits();
-        let program = &[Bytecode::LoadValue as u32, 0, f_val, Bytecode::Halt as u32];
+        let program = &[Bytecode::LoadValue as u32, 1, f_val, Bytecode::Halt as u32];
 
         let cpu = run_program(program, 128, 8);
-        let result_bits = cpu.get_registers()[0];
+        let result_bits = cpu.get_registers()[1];
         let result_float = f32::from_bits(result_bits);
 
         assert!((result_float - 1.5).abs() < 1e-7);
@@ -1748,19 +1772,19 @@ mod tests {
         let f2 = 2.5f32.to_bits();
         let program = &[
             Bytecode::LoadValue as u32,
-            0,
-            f1, // R0=1.5
-            Bytecode::LoadValue as u32,
             1,
-            f2, // R1=2.5
+            f1, // R1=1.5
+            Bytecode::LoadValue as u32,
+            2,
+            f2, // R2=2.5
             Bytecode::FAdd as u32,
-            0,
-            1, // R0=R0+R1 =4.0
+            1,
+            2, // R1=R1+R2 =4.0
             Bytecode::Halt as u32,
         ];
 
         let cpu = run_program(program, 128, 8);
-        let result_float = f32::from_bits(cpu.get_registers()[0]);
+        let result_float = f32::from_bits(cpu.get_registers()[1]);
 
         assert!((result_float - 4.0).abs() < 1e-7);
     }
@@ -1771,19 +1795,19 @@ mod tests {
         let f3 = 3.0f32.to_bits();
         let program = &[
             Bytecode::LoadValue as u32,
-            0,
+            1,
             f5,
             Bytecode::LoadValue as u32,
-            1,
+            2,
             f3,
             Bytecode::FSub as u32,
-            0,
             1,
+            2,
             Bytecode::Halt as u32,
         ];
 
         let cpu = run_program(program, 128, 8);
-        let result = f32::from_bits(cpu.get_registers()[0]);
+        let result = f32::from_bits(cpu.get_registers()[1]);
 
         assert!((result - 2.0).abs() < 1e-7);
     }
@@ -1794,19 +1818,19 @@ mod tests {
         let f3_5 = 3.5f32.to_bits();
         let program = &[
             Bytecode::LoadValue as u32,
-            0,
+            1,
             f2,
             Bytecode::LoadValue as u32,
-            1,
+            2,
             f3_5,
             Bytecode::FMul as u32,
-            0,
             1,
+            2,
             Bytecode::Halt as u32,
         ];
 
         let cpu = run_program(program, 128, 8);
-        let result = f32::from_bits(cpu.get_registers()[0]);
+        let result = f32::from_bits(cpu.get_registers()[1]);
 
         assert!((result - 7.0).abs() < 1e-7);
     }
@@ -1817,19 +1841,19 @@ mod tests {
         let f2 = 2.0f32.to_bits();
         let program = &[
             Bytecode::LoadValue as u32,
-            0,
+            1,
             f10,
             Bytecode::LoadValue as u32,
-            1,
+            2,
             f2,
             Bytecode::FDiv as u32,
-            0,
             1,
+            2,
             Bytecode::Halt as u32,
         ];
 
         let cpu = run_program(program, 128, 8);
-        let result = f32::from_bits(cpu.get_registers()[0]);
+        let result = f32::from_bits(cpu.get_registers()[1]);
 
         assert!((result - 5.0).abs() < 1e-7);
     }
