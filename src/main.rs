@@ -47,8 +47,8 @@ impl HostIO for SimpleHostIo {
     {
         match code {
             0 => {
-                let start = cpu.get_registers()[1] as usize;
-                let length = cpu.get_registers()[2] as usize;
+                let start = cpu.get_registers()[2] as usize;
+                let length = cpu.get_registers()[3] as usize;
                 let mem = &cpu.get_memory()[start..start + length];
                 let s = String::from_utf8(
                     mem.iter()
