@@ -51,7 +51,7 @@ impl HostIO for SimpleHostIo {
 }
 
 fn run(memory: &[u32], entrypoint: u32, verbose: bool) -> anyhow::Result<()> {
-    let mut cpu = NativeCpu::new(1024 * 1024, 16, SimpleHostIo);
+    let mut cpu = NativeCpu::new(1024 * 1024, 32, SimpleHostIo);
     cpu.set_verbose(verbose);
     cpu.set_entrypoint(entrypoint);
 

@@ -17,6 +17,15 @@ const L2_WAYS: usize = 8;
 const L3_SETS: usize = 1024;
 const L3_WAYS: usize = 16;
 
+const REGISTER_WIDTH: u32 = 32; // Example: 8, 16, 32, or 64, etc.
+
+// Calculate how many bits we need to mask off for shifting
+// e.g. 32.trailing_zeros() = 5; 64.trailing_zeros() = 6
+const SHIFT_BITS: u32 = REGISTER_WIDTH.trailing_zeros();
+
+// Then your mask is (1 << SHIFT_BITS) - 1
+const SHIFT_MASK: u32 = (1 << SHIFT_BITS) - 1;
+
 #[derive(Debug, Default, Clone)]
 struct CacheLine {
     valid: bool,
@@ -203,6 +212,56 @@ impl<IO: HostIO> NativeCpu<IO> {
             host_io: Some(host_io),
         }
     }
+    /// Perform a logical left shift by `count` bits, returning (new_value, carry_bit).
+    fn shift_left(&self, value: u32, count: u32) -> (u32, bool) {
+        let shift = count & SHIFT_MASK;
+        if shift == 0 {
+            return (value, false);
+        }
+        // The carry bit is the leftmost bit that gets shifted out:
+        let carry_out = ((value >> (32 - shift)) & 1) == 1;
+        let result = value.wrapping_shl(shift);
+        (result, carry_out)
+    }
+
+    /// Perform a logical right shift by `count` bits, returning (new_value, carry_bit).
+    fn shift_right(&self, value: u32, count: u32) -> (u32, bool) {
+        let shift = count & 31;
+        if shift == 0 {
+            return (value, false);
+        }
+        // The carry bit is the rightmost bit that gets shifted out:
+        let carry_out = ((value >> (shift - 1)) & 1) == 1;
+        let result = value.wrapping_shr(shift);
+        (result, carry_out)
+    }
+
+    /// Update flags after a logical left shift.
+    /// If shift_count == 1, we follow x86-like semantics: Overflow is set if MSB changed.
+    /// Otherwise, we clear overflow.
+    fn update_flags_shl(&mut self, original: u32, result: u32, carry_out: bool, shift_count: u32) {
+        self.flags.zero = result == 0;
+        self.flags.sign = (result as i32) < 0;
+        self.flags.carry = carry_out;
+
+        // Overflow: if shifting by 1, check if the sign bit changed
+        if shift_count == 1 {
+            let msb_original = (original >> 31) & 1;
+            let msb_result = (result >> 31) & 1;
+            self.flags.overflow = msb_original != msb_result;
+        } else {
+            self.flags.overflow = false;
+        }
+    }
+
+    /// Update flags after a logical right shift.
+    /// Typically, there's no concept of overflow for logical right shift, so we set OF=0.
+    fn update_flags_shr(&mut self, result: u32, carry_out: bool) {
+        self.flags.zero = result == 0;
+        self.flags.sign = (result as i32) < 0;
+        self.flags.carry = carry_out;
+        self.flags.overflow = false;
+    }
 
     fn access(&mut self, address: u32, direction: MemoryAccessDirection) -> usize {
         self.stats.memory_access_count += 1;
@@ -385,6 +444,12 @@ impl<IO: HostIO> NativeCpu<IO> {
                 self.instruction_pointer,
             )),
         }
+    }
+
+    fn read_operand(&mut self, address: u32) -> Result<u32, ExecutionError> {
+        let result = self.read_memory(address)?;
+        self.instruction_pointer += 1;
+        Ok(result)
     }
 
     fn read_memory(&mut self, address: u32) -> Result<u32, ExecutionError> {
@@ -681,28 +746,20 @@ impl<IO: HostIO> NativeCpu<IO> {
                     if self.verbose {
                         println!("NOP");
                     }
-                    self.stats.cycles += 1;
                 }
                 Bytecode::LoadValue => {
-                    let reg = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
-
-                    let imm = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
+                    let reg = self.read_operand(self.instruction_pointer)?;
+                    let imm = self.read_operand(self.instruction_pointer)?;
 
                     if self.verbose {
                         println!("LOAD R{}, {}", reg, imm);
                     }
 
                     self.write_register(reg, imm);
-                    self.stats.cycles += 1;
                 }
                 Bytecode::LoadMemory => {
-                    let reg = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
-
-                    let addr = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
+                    let reg = self.read_operand(self.instruction_pointer)?;
+                    let addr = self.read_operand(self.instruction_pointer)?;
 
                     if self.verbose {
                         println!("LOAD R{}, @{:#02x}", reg, addr);
@@ -710,64 +767,48 @@ impl<IO: HostIO> NativeCpu<IO> {
 
                     let value = self.read_memory(addr)?;
                     self.write_register(reg, value);
-                    self.stats.cycles += 1;
                 }
                 Bytecode::LoadReg => {
-                    let reg1 = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
-
-                    let reg2 = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
+                    let reg1 = self.read_operand(self.instruction_pointer)?;
+                    let reg2 = self.read_operand(self.instruction_pointer)?;
 
                     if self.verbose {
                         println!("LOAD R{}, R{}", reg1, reg2);
                     }
 
                     self.write_register(reg1, self.read_register(reg2));
-                    self.stats.cycles += 1;
                 }
                 Bytecode::Store => {
-                    let addr = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
-
-                    let reg = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
+                    let addr = self.read_operand(self.instruction_pointer)?;
+                    let reg = self.read_operand(self.instruction_pointer)?;
 
                     if self.verbose {
                         println!("STORE @{:#02x}, R{}", addr, reg);
                     }
 
                     self.write_memory(addr, self.read_register(reg))?;
-                    self.stats.cycles += 1;
                 }
                 Bytecode::StoreValue => {
-                    let addr = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
-
-                    let imm = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
+                    let addr = self.read_operand(self.instruction_pointer)?;
+                    let imm = self.read_operand(self.instruction_pointer)?;
 
                     if self.verbose {
                         println!("STORE @{:#02x}, {}", addr, imm);
                     }
 
                     self.write_memory(addr, imm)?;
-                    self.stats.cycles += 1;
                 }
                 Bytecode::PushValue => {
-                    let imm = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
+                    let imm = self.read_operand(self.instruction_pointer)?;
 
                     if self.verbose {
                         println!("PUSH {}", imm);
                     }
 
                     self.push_stack(imm)?;
-                    self.stats.cycles += 1;
                 }
                 Bytecode::PushReg => {
-                    let reg = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
+                    let reg = self.read_operand(self.instruction_pointer)?;
 
                     if self.verbose {
                         println!("PUSH R{}", reg);
@@ -776,11 +817,9 @@ impl<IO: HostIO> NativeCpu<IO> {
                     let val = self.read_register(reg);
 
                     self.push_stack(val)?;
-                    self.stats.cycles += 1;
                 }
                 Bytecode::Pop => {
-                    let reg = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
+                    let reg = self.read_operand(self.instruction_pointer)?;
 
                     if self.verbose {
                         println!("POP R{}", reg);
@@ -788,14 +827,10 @@ impl<IO: HostIO> NativeCpu<IO> {
 
                     let value = self.pop_stack()?;
                     self.write_register(reg, value);
-                    self.stats.cycles += 1;
                 }
                 Bytecode::And => {
-                    let reg1 = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
-
-                    let reg2 = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
+                    let reg1 = self.read_operand(self.instruction_pointer)?;
+                    let reg2 = self.read_operand(self.instruction_pointer)?;
 
                     let a = self.read_register(reg1);
                     let b = self.read_register(reg2);
@@ -807,14 +842,10 @@ impl<IO: HostIO> NativeCpu<IO> {
 
                     self.write_register(reg1, result);
                     self.update_flags_and(a, b, result);
-                    self.stats.cycles += 1;
                 }
                 Bytecode::AndValue => {
-                    let reg = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
-
-                    let imm = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
+                    let reg = self.read_operand(self.instruction_pointer)?;
+                    let imm = self.read_operand(self.instruction_pointer)?;
 
                     let a = self.read_register(reg);
                     let b = imm;
@@ -826,14 +857,10 @@ impl<IO: HostIO> NativeCpu<IO> {
 
                     self.write_register(reg, result);
                     self.update_flags_and(a, b, result);
-                    self.stats.cycles += 1;
                 }
                 Bytecode::Or => {
-                    let reg1 = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
-
-                    let reg2 = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
+                    let reg1 = self.read_operand(self.instruction_pointer)?;
+                    let reg2 = self.read_operand(self.instruction_pointer)?;
 
                     let a = self.read_register(reg1);
                     let b = self.read_register(reg2);
@@ -845,14 +872,10 @@ impl<IO: HostIO> NativeCpu<IO> {
 
                     self.write_register(reg1, result);
                     self.update_flags_or(a, b, result);
-                    self.stats.cycles += 1;
                 }
                 Bytecode::OrValue => {
-                    let reg = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
-
-                    let imm = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
+                    let reg = self.read_operand(self.instruction_pointer)?;
+                    let imm = self.read_operand(self.instruction_pointer)?;
 
                     let a = self.read_register(reg);
                     let b = imm;
@@ -864,14 +887,10 @@ impl<IO: HostIO> NativeCpu<IO> {
 
                     self.write_register(reg, result);
                     self.update_flags_or(a, b, result);
-                    self.stats.cycles += 1;
                 }
                 Bytecode::Xor => {
-                    let reg1 = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
-
-                    let reg2 = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
+                    let reg1 = self.read_operand(self.instruction_pointer)?;
+                    let reg2 = self.read_operand(self.instruction_pointer)?;
 
                     let a = self.read_register(reg1);
                     let b = self.read_register(reg2);
@@ -883,14 +902,10 @@ impl<IO: HostIO> NativeCpu<IO> {
 
                     self.write_register(reg1, result);
                     self.update_flags_xor(a, b, result);
-                    self.stats.cycles += 1;
                 }
                 Bytecode::XorValue => {
-                    let reg = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
-
-                    let imm = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
+                    let reg = self.read_operand(self.instruction_pointer)?;
+                    let imm = self.read_operand(self.instruction_pointer)?;
 
                     let a = self.read_register(reg);
                     let b = imm;
@@ -902,11 +917,9 @@ impl<IO: HostIO> NativeCpu<IO> {
 
                     self.write_register(reg, result);
                     self.update_flags_xor(a, b, result);
-                    self.stats.cycles += 1;
                 }
                 Bytecode::Not => {
-                    let reg = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
+                    let reg = self.read_operand(self.instruction_pointer)?;
 
                     let a = self.read_register(reg);
                     let result = !a;
@@ -917,14 +930,94 @@ impl<IO: HostIO> NativeCpu<IO> {
 
                     self.write_register(reg, result);
                     self.update_flags_not(a, result);
-                    self.stats.cycles += 1;
+                }
+                Bytecode::ShiftLeft => {
+                    // shift R<reg1> by R<reg2> (logical left)
+                    let reg1 = self.read_operand(self.instruction_pointer)?;
+                    let reg2 = self.read_operand(self.instruction_pointer)?;
+
+                    let original = self.read_register(reg1);
+                    let shift_count = self.read_register(reg2) & SHIFT_MASK;
+
+                    let (result, carry_out) = self.shift_left(original, shift_count);
+                    self.write_register(reg1, result);
+
+                    // update flags
+                    self.update_flags_shl(original, result, carry_out, shift_count);
+
+                    if self.verbose {
+                        println!(
+                            "SHL R{}({:#x}), R{}({}) => {:#x}, CF={}",
+                            reg1, original, reg2, shift_count, result, carry_out
+                        );
+                    }
+                }
+                Bytecode::ShiftLeftValue => {
+                    // shift R<reg> by immediate (logical left)
+                    let reg1 = self.read_operand(self.instruction_pointer)?;
+                    let imm = self.read_operand(self.instruction_pointer)?; // shift amount
+
+                    let original = self.read_register(reg1);
+                    let shift_count = imm & SHIFT_MASK;
+
+                    let (result, carry_out) = self.shift_left(original, shift_count);
+                    self.write_register(reg1, result);
+
+                    // update flags
+                    self.update_flags_shl(original, result, carry_out, shift_count);
+
+                    if self.verbose {
+                        println!(
+                            "SHL R{}({:#x}), #{} => {:#x}, CF={}",
+                            reg1, original, shift_count, result, carry_out
+                        );
+                    }
+                }
+                Bytecode::ShiftRight => {
+                    // shift R<reg1> by R<reg2> (logical right)
+                    let reg1 = self.read_operand(self.instruction_pointer)?;
+                    let reg2 = self.read_operand(self.instruction_pointer)?;
+
+                    let original = self.read_register(reg1);
+                    let shift_count = self.read_register(reg2) & SHIFT_MASK;
+
+                    let (result, carry_out) = self.shift_right(original, shift_count);
+                    self.write_register(reg1, result);
+
+                    // update flags
+                    self.update_flags_shr(result, carry_out);
+
+                    if self.verbose {
+                        println!(
+                            "SHR R{}({:#x}), R{}({}) => {:#x}, CF={}",
+                            reg1, original, reg2, shift_count, result, carry_out
+                        );
+                    }
+                }
+                Bytecode::ShiftRightValue => {
+                    // shift R<reg> by immediate (logical right)
+                    let reg1 = self.read_operand(self.instruction_pointer)?;
+                    let imm = self.read_operand(self.instruction_pointer)?; // shift amount
+
+                    let original = self.read_register(reg1);
+                    let shift_count = imm & SHIFT_MASK;
+
+                    let (result, carry_out) = self.shift_right(original, shift_count);
+                    self.write_register(reg1, result);
+
+                    // update flags
+                    self.update_flags_shr(result, carry_out);
+
+                    if self.verbose {
+                        println!(
+                            "SHR R{}({:#x}), #{} => {:#x}, CF={}",
+                            reg1, original, shift_count, result, carry_out
+                        );
+                    }
                 }
                 Bytecode::Add => {
-                    let reg1 = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
-
-                    let reg2 = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
+                    let reg1 = self.read_operand(self.instruction_pointer)?;
+                    let reg2 = self.read_operand(self.instruction_pointer)?;
 
                     let a = self.read_register(reg1);
                     let b = self.read_register(reg2);
@@ -936,14 +1029,10 @@ impl<IO: HostIO> NativeCpu<IO> {
 
                     self.write_register(reg1, result);
                     self.update_flags_add(a, b, result);
-                    self.stats.cycles += 1;
                 }
                 Bytecode::AddValue => {
-                    let reg = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
-
-                    let imm = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
+                    let reg = self.read_operand(self.instruction_pointer)?;
+                    let imm = self.read_operand(self.instruction_pointer)?;
 
                     let a = self.read_register(reg);
                     let b = imm;
@@ -955,14 +1044,10 @@ impl<IO: HostIO> NativeCpu<IO> {
 
                     self.write_register(reg, result);
                     self.update_flags_add(a, b, result);
-                    self.stats.cycles += 1;
                 }
                 Bytecode::FAdd => {
-                    let reg1 = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
-
-                    let reg2 = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
+                    let reg1 = self.read_operand(self.instruction_pointer)?;
+                    let reg2 = self.read_operand(self.instruction_pointer)?;
 
                     let a = f32::from_bits(self.read_register(reg1));
                     let b = f32::from_bits(self.read_register(reg2));
@@ -974,14 +1059,10 @@ impl<IO: HostIO> NativeCpu<IO> {
 
                     self.write_register(reg1, result.to_bits());
                     self.update_flags_float(a, b);
-                    self.stats.cycles += 2;
                 }
                 Bytecode::FAddValue => {
-                    let reg = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
-
-                    let imm = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
+                    let reg = self.read_operand(self.instruction_pointer)?;
+                    let imm = self.read_operand(self.instruction_pointer)?;
 
                     let a = f32::from_bits(self.read_register(reg));
                     let b = f32::from_bits(imm);
@@ -993,14 +1074,10 @@ impl<IO: HostIO> NativeCpu<IO> {
 
                     self.write_register(reg, result.to_bits());
                     self.update_flags_float(a, b);
-                    self.stats.cycles += 2;
                 }
                 Bytecode::Sub => {
-                    let reg1 = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
-
-                    let reg2 = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
+                    let reg1 = self.read_operand(self.instruction_pointer)?;
+                    let reg2 = self.read_operand(self.instruction_pointer)?;
 
                     let a = self.read_register(reg1);
                     let b = self.read_register(reg2);
@@ -1012,14 +1089,10 @@ impl<IO: HostIO> NativeCpu<IO> {
 
                     self.write_register(reg1, result);
                     self.update_flags_sub(a, b, result);
-                    self.stats.cycles += 1;
                 }
                 Bytecode::SubValue => {
-                    let reg = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
-
-                    let imm = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
+                    let reg = self.read_operand(self.instruction_pointer)?;
+                    let imm = self.read_operand(self.instruction_pointer)?;
 
                     let a = self.read_register(reg);
                     let b = imm;
@@ -1031,14 +1104,10 @@ impl<IO: HostIO> NativeCpu<IO> {
 
                     self.write_register(reg, result);
                     self.update_flags_sub(a, b, result);
-                    self.stats.cycles += 1;
                 }
                 Bytecode::FSub => {
-                    let reg1 = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
-
-                    let reg2 = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
+                    let reg1 = self.read_operand(self.instruction_pointer)?;
+                    let reg2 = self.read_operand(self.instruction_pointer)?;
 
                     let a = f32::from_bits(self.read_register(reg1));
                     let b = f32::from_bits(self.read_register(reg2));
@@ -1050,14 +1119,10 @@ impl<IO: HostIO> NativeCpu<IO> {
 
                     self.write_register(reg1, result.to_bits());
                     self.update_flags_float(a, b);
-                    self.stats.cycles += 2;
                 }
                 Bytecode::FSubValue => {
-                    let reg = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
-
-                    let imm = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
+                    let reg = self.read_operand(self.instruction_pointer)?;
+                    let imm = self.read_operand(self.instruction_pointer)?;
 
                     let a = f32::from_bits(self.read_register(reg));
                     let b = f32::from_bits(imm);
@@ -1069,14 +1134,10 @@ impl<IO: HostIO> NativeCpu<IO> {
 
                     self.write_register(reg, result.to_bits());
                     self.update_flags_float(a, b);
-                    self.stats.cycles += 2;
                 }
                 Bytecode::Mul => {
-                    let reg1 = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
-
-                    let reg2 = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
+                    let reg1 = self.read_operand(self.instruction_pointer)?;
+                    let reg2 = self.read_operand(self.instruction_pointer)?;
 
                     let a = self.read_register(reg1);
                     let b = self.read_register(reg2);
@@ -1090,15 +1151,10 @@ impl<IO: HostIO> NativeCpu<IO> {
 
                     self.write_register(reg1, result);
                     self.update_flags_mul(a, b, wide_result);
-
-                    self.stats.cycles += 4;
                 }
                 Bytecode::MulValue => {
-                    let reg = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
-
-                    let imm = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
+                    let reg = self.read_operand(self.instruction_pointer)?;
+                    let imm = self.read_operand(self.instruction_pointer)?;
 
                     let a = self.read_register(reg);
                     let b = imm;
@@ -1112,15 +1168,10 @@ impl<IO: HostIO> NativeCpu<IO> {
 
                     self.write_register(reg, result);
                     self.update_flags_mul(a, b, wide_result);
-
-                    self.stats.cycles += 4;
                 }
                 Bytecode::FMul => {
-                    let reg1 = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
-
-                    let reg2 = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
+                    let reg1 = self.read_operand(self.instruction_pointer)?;
+                    let reg2 = self.read_operand(self.instruction_pointer)?;
 
                     let a = f32::from_bits(self.read_register(reg1));
                     let b = f32::from_bits(self.read_register(reg2));
@@ -1132,14 +1183,10 @@ impl<IO: HostIO> NativeCpu<IO> {
 
                     self.write_register(reg1, result.to_bits());
                     self.update_flags_float(a, b);
-                    self.stats.cycles += 4;
                 }
                 Bytecode::FMulValue => {
-                    let reg = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
-
-                    let imm = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
+                    let reg = self.read_operand(self.instruction_pointer)?;
+                    let imm = self.read_operand(self.instruction_pointer)?;
 
                     let a = f32::from_bits(self.read_register(reg));
                     let b = f32::from_bits(imm);
@@ -1151,14 +1198,10 @@ impl<IO: HostIO> NativeCpu<IO> {
 
                     self.write_register(reg, result.to_bits());
                     self.update_flags_float(a, b);
-                    self.stats.cycles += 4;
                 }
                 Bytecode::Div => {
-                    let reg1 = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
-
-                    let reg2 = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
+                    let reg1 = self.read_operand(self.instruction_pointer)?;
+                    let reg2 = self.read_operand(self.instruction_pointer)?;
 
                     let a = self.read_register(reg1);
                     let b = self.read_register(reg2);
@@ -1175,15 +1218,10 @@ impl<IO: HostIO> NativeCpu<IO> {
 
                     self.write_register(reg1, result);
                     self.update_flags_div(a, b, result);
-
-                    self.stats.cycles += 27;
                 }
                 Bytecode::DivValue => {
-                    let reg = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
-
-                    let imm = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
+                    let reg = self.read_operand(self.instruction_pointer)?;
+                    let imm = self.read_operand(self.instruction_pointer)?;
 
                     let a = self.read_register(reg);
                     let b = imm;
@@ -1200,15 +1238,10 @@ impl<IO: HostIO> NativeCpu<IO> {
 
                     self.write_register(reg, result);
                     self.update_flags_div(a, b, result);
-
-                    self.stats.cycles += 27;
                 }
                 Bytecode::FDiv => {
-                    let reg1 = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
-
-                    let reg2 = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
+                    let reg1 = self.read_operand(self.instruction_pointer)?;
+                    let reg2 = self.read_operand(self.instruction_pointer)?;
 
                     let a = f32::from_bits(self.read_register(reg1));
                     let b = f32::from_bits(self.read_register(reg2));
@@ -1225,14 +1258,10 @@ impl<IO: HostIO> NativeCpu<IO> {
 
                     self.write_register(reg1, result.to_bits());
                     self.update_flags_float(a, b);
-                    self.stats.cycles += 27;
                 }
                 Bytecode::FDivValue => {
-                    let reg = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
-
-                    let imm = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
+                    let reg = self.read_operand(self.instruction_pointer)?;
+                    let imm = self.read_operand(self.instruction_pointer)?;
 
                     let a = f32::from_bits(self.read_register(reg));
                     let b = f32::from_bits(imm);
@@ -1249,37 +1278,25 @@ impl<IO: HostIO> NativeCpu<IO> {
 
                     self.write_register(reg, result.to_bits());
                     self.update_flags_float(a, b);
-                    self.stats.cycles += 27;
                 }
                 Bytecode::LoadByte => {
-                    let reg = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
-
-                    let addr = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
+                    let reg = self.read_operand(self.instruction_pointer)?;
+                    let addr = self.read_operand(self.instruction_pointer)?;
 
                     let byte = self.read_byte(addr)?;
                     self.write_register(reg, byte as u32);
-                    self.stats.cycles += 2;
                 }
 
                 Bytecode::StoreByte => {
-                    let addr = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
-
-                    let reg = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
+                    let addr = self.read_operand(self.instruction_pointer)?;
+                    let reg = self.read_operand(self.instruction_pointer)?;
 
                     let value = (self.read_register(reg) & 0xFF) as u8;
                     self.write_byte(addr, value)?;
-                    self.stats.cycles += 2;
                 }
                 Bytecode::Cmp => {
-                    let reg1 = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
-
-                    let reg2 = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
+                    let reg1 = self.read_operand(self.instruction_pointer)?;
+                    let reg2 = self.read_operand(self.instruction_pointer)?;
 
                     let a = self.read_register(reg1);
                     let b = self.read_register(reg2);
@@ -1294,16 +1311,11 @@ impl<IO: HostIO> NativeCpu<IO> {
                     }
 
                     self.update_flags_sub(a, b, result);
-
-                    self.stats.cycles += 1;
                 }
 
                 Bytecode::CmpValue => {
-                    let reg = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
-
-                    let imm = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
+                    let reg = self.read_operand(self.instruction_pointer)?;
+                    let imm = self.read_operand(self.instruction_pointer)?;
 
                     let a = self.read_register(reg);
                     let b = imm;
@@ -1318,15 +1330,10 @@ impl<IO: HostIO> NativeCpu<IO> {
                     }
 
                     self.update_flags_sub(a, b, result);
-
-                    self.stats.cycles += 1;
                 }
                 Bytecode::FCmp => {
-                    let reg1 = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
-
-                    let reg2 = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
+                    let reg1 = self.read_operand(self.instruction_pointer)?;
+                    let reg2 = self.read_operand(self.instruction_pointer)?;
 
                     let a = f32::from_bits(self.read_register(reg1));
                     let b = f32::from_bits(self.read_register(reg2));
@@ -1339,15 +1346,10 @@ impl<IO: HostIO> NativeCpu<IO> {
                     }
 
                     self.update_flags_float(a, b);
-
-                    self.stats.cycles += 2;
                 }
                 Bytecode::FCmpValue => {
-                    let reg = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
-
-                    let imm = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
+                    let reg = self.read_operand(self.instruction_pointer)?;
+                    let imm = self.read_operand(self.instruction_pointer)?;
 
                     let a = f32::from_bits(self.read_register(reg));
                     let b = f32::from_bits(imm);
@@ -1360,18 +1362,13 @@ impl<IO: HostIO> NativeCpu<IO> {
                     }
 
                     self.update_flags_float(a, b);
-
-                    self.stats.cycles += 2;
                 }
                 Bytecode::Jmp => {
-                    let imm = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer = imm;
+                    let imm = self.read_operand(self.instruction_pointer)?;
 
                     if self.verbose {
                         println!("JMP {}", imm);
                     }
-
-                    self.stats.cycles += 1;
                 }
                 Bytecode::Je
                 | Bytecode::Jne
@@ -1390,8 +1387,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                 | Bytecode::Js
                 | Bytecode::Jns
                 | Bytecode::Jxcz => {
-                    let imm = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
+                    let imm = self.read_operand(self.instruction_pointer)?;
 
                     if self.should_jump(opcode) {
                         if self.verbose {
@@ -1401,12 +1397,9 @@ impl<IO: HostIO> NativeCpu<IO> {
                     } else if self.verbose {
                         println!("CONDITIONAL JUMP ({opcode}) not taken");
                     }
-
-                    self.stats.cycles += 2;
                 }
                 Bytecode::Call => {
-                    let target = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
+                    let target = self.read_operand(self.instruction_pointer)?;
 
                     if self.verbose {
                         println!("CALL @{target:#02x}");
@@ -1415,8 +1408,6 @@ impl<IO: HostIO> NativeCpu<IO> {
                     self.push_stack(self.instruction_pointer)?;
 
                     self.instruction_pointer = target;
-
-                    self.stats.cycles += 25;
                 }
                 Bytecode::Ret => {
                     let return_address = self.pop_stack()?;
@@ -1426,7 +1417,6 @@ impl<IO: HostIO> NativeCpu<IO> {
                     }
 
                     self.instruction_pointer = return_address;
-                    self.stats.cycles += 5;
                 }
                 Bytecode::Syscall => {
                     let code = self.read_register(1);
@@ -1443,8 +1433,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     }
                 }
                 Bytecode::Inspect => {
-                    let addr = self.read_memory(self.instruction_pointer)?;
-                    self.instruction_pointer += 1;
+                    let addr = self.read_operand(self.instruction_pointer)?;
 
                     println!("INSPECT @{:#02x} = {}", addr, self.read_memory(addr)?);
                 }
@@ -1455,9 +1444,74 @@ impl<IO: HostIO> NativeCpu<IO> {
                     break;
                 }
             }
+
+            self.stats.cycles += Self::update_cycles(opcode);
+
             executed += 1;
         }
         Ok(self.stats)
+    }
+
+    fn update_cycles(opcode: Bytecode) -> usize {
+        match opcode {
+            Bytecode::Nop
+            | Bytecode::LoadValue
+            | Bytecode::LoadMemory
+            | Bytecode::LoadReg
+            | Bytecode::Store
+            | Bytecode::StoreValue
+            | Bytecode::PushValue
+            | Bytecode::PushReg
+            | Bytecode::Pop
+            | Bytecode::And
+            | Bytecode::AndValue
+            | Bytecode::Or
+            | Bytecode::OrValue
+            | Bytecode::Xor
+            | Bytecode::XorValue
+            | Bytecode::Not
+            | Bytecode::ShiftLeft
+            | Bytecode::ShiftLeftValue
+            | Bytecode::ShiftRight
+            | Bytecode::ShiftRightValue
+            | Bytecode::Add
+            | Bytecode::AddValue
+            | Bytecode::Sub
+            | Bytecode::SubValue
+            | Bytecode::Cmp
+            | Bytecode::CmpValue
+            | Bytecode::Jmp => 1,
+            Bytecode::LoadByte
+            | Bytecode::StoreByte
+            | Bytecode::FCmp
+            | Bytecode::FCmpValue
+            | Bytecode::Je
+            | Bytecode::Jne
+            | Bytecode::Jg
+            | Bytecode::Jge
+            | Bytecode::Jl
+            | Bytecode::Jle
+            | Bytecode::Ja
+            | Bytecode::Jae
+            | Bytecode::Jb
+            | Bytecode::Jbe
+            | Bytecode::Jc
+            | Bytecode::Jnc
+            | Bytecode::Jo
+            | Bytecode::Jno
+            | Bytecode::Js
+            | Bytecode::Jns
+            | Bytecode::Jxcz
+            | Bytecode::FSub
+            | Bytecode::FSubValue
+            | Bytecode::FAdd
+            | Bytecode::FAddValue => 2,
+            Bytecode::Mul | Bytecode::MulValue | Bytecode::FMul | Bytecode::FMulValue => 4,
+            Bytecode::Ret => 5,
+            Bytecode::Call => 25,
+            Bytecode::Div | Bytecode::DivValue | Bytecode::FDiv | Bytecode::FDivValue => 27,
+            Bytecode::Syscall | Bytecode::Inspect | Bytecode::Halt => 0,
+        }
     }
 
     fn valid_address(&self, address: u32) -> Result<(), ExecutionError> {
@@ -1494,7 +1548,7 @@ mod tests {
 
     fn run_program(program: &[u32], memory_size: u32, registers: u8) -> NativeCpu<NullHostIO> {
         let mut cpu = NativeCpu::new(memory_size, registers, NullHostIO);
-        cpu.load_memory(0, program);
+        cpu.load_protected_memory(0, program);
         cpu.execute(RunMode::Run).unwrap();
         cpu
     }
@@ -1707,7 +1761,7 @@ mod tests {
         host_io: IO,
     ) -> NativeCpu<IO> {
         let mut cpu = NativeCpu::new(memory_size, registers, host_io);
-        cpu.load_memory(0, program);
+        cpu.load_protected_memory(0, program);
         cpu.execute(RunMode::Run).unwrap();
         cpu
     }
@@ -1856,5 +1910,168 @@ mod tests {
         let result = f32::from_bits(cpu.get_registers()[1]);
 
         assert!((result - 5.0).abs() < 1e-7);
+    }
+
+    #[test]
+    fn test_shift_left_register() {
+        // Program flow:
+        // 1) Load R1 with 0x80000001  (has MSB set and LSB set)
+        // 2) Load R2 with 1          (shift amount in register)
+        // 3) ShiftLeft R1, R2       (R1 <<= R2)
+        // 4) Halt
+        //
+        // Expected:
+        //   - R1 becomes 0x00000002
+        //   - carry flag set to true (the MSB "fell off")
+        //   - sign flag = false (since 0x00000002 is positive)
+        //   - zero flag = false
+        //   - overflow flag = true, because shifting by 1 changed the MSB
+        //     (x86-like semantics if shift == 1)
+
+        let program = &[
+            Bytecode::LoadValue as u32,
+            1,
+            0x80000001, // R1 = 0x80000001
+            Bytecode::LoadValue as u32,
+            2,
+            1, // R2 = 1
+            Bytecode::ShiftLeft as u32,
+            1,
+            2, // SHL R1, R1
+            Bytecode::Halt as u32,
+        ];
+
+        let cpu = run_program(program, 128, 4);
+        let registers = cpu.get_registers();
+
+        // Check R1 result
+        assert_eq!(
+            registers[1], 0x00000002,
+            "R1 should have been shifted left by 1"
+        );
+
+        // Check flags
+        assert!(!cpu.flags.zero, "0x2 is not zero");
+        assert!(!cpu.flags.sign, "0x2 has no sign bit set");
+        assert!(cpu.flags.carry, "Should carry out the top bit 1");
+        assert!(
+            cpu.flags.overflow,
+            "Shifting MSB out with shift=1 => overflow set"
+        );
+    }
+
+    #[test]
+    fn test_shift_left_value() {
+        // Program flow:
+        // 1) Load R1 with 0x00000001
+        // 2) ShiftLeftValue R1, 4  => R1 <<= 4
+        // 3) Halt
+        //
+        // Expected:
+        //   - R1 = 0x00000010
+        //   - carry = false, no high bits fell off
+        //   - sign = false, zero = false, overflow = false (shift=4 won't set OF on x86-like semantics)
+
+        let program = &[
+            Bytecode::LoadValue as u32,
+            1,
+            0x00000001,
+            Bytecode::ShiftLeftValue as u32,
+            1,
+            4,
+            Bytecode::Halt as u32,
+        ];
+
+        let cpu = run_program(program, 128, 4);
+        let registers = cpu.get_registers();
+
+        assert_eq!(registers[1], 0x10, "R1 = 1 << 4 should be 0x10");
+
+        // Check flags
+        assert!(!cpu.flags.zero);
+        assert!(!cpu.flags.sign);
+        assert!(!cpu.flags.carry, "No high bit was lost shifting 0x1 by 4");
+        // shift=4 => overflow=0 in our design
+        assert!(!cpu.flags.overflow);
+    }
+
+    #[test]
+    fn test_shift_right_register() {
+        // Program flow:
+        // 1) Load R1 with 0x000000FF
+        // 2) Load R2 with 4
+        // 3) ShiftRight R1, R2 => R1 >>= 4 (logical right)
+        // 4) Halt
+        //
+        // Expected:
+        //   - R1 = 0x0000000F
+        //   - carry = bit that was shifted out (lowest 4 bits were 1111, so carry = 1 after final shift)
+        //   - zero = false, sign = false, overflow = false (typical logical right)
+
+        let program = &[
+            Bytecode::LoadValue as u32,
+            1,
+            0x000000FF,
+            Bytecode::LoadValue as u32,
+            2,
+            4,
+            Bytecode::ShiftRight as u32,
+            1,
+            2,
+            Bytecode::Halt as u32,
+        ];
+
+        let cpu = run_program(program, 128, 4);
+        let registers = cpu.get_registers();
+
+        assert_eq!(registers[1], 0x0000000F);
+
+        // Check flags
+        assert!(!cpu.flags.zero);
+        assert!(!cpu.flags.sign);
+        assert!(cpu.flags.carry, "The last bit shifted out was 1");
+        assert!(!cpu.flags.overflow);
+    }
+
+    #[test]
+    fn test_shift_right_value_zero_flag() {
+        // Program flow:
+        // 1) Load R1 with 0x00000001
+        // 2) ShiftRightValue R1, 1 => R1 >>= 1
+        // 3) ShiftRightValue R1, 1 => R1 >>= 1 again
+        //    after two shifts, R1 = 0x00000000 => zero flag set
+        // 4) Halt
+        //
+        // Expected:
+        //   - final R1 = 0
+        //   - zero = true
+        //   - carry = ?  (the bit shifted out each time)
+        //        first shift => carry=1 (LSB=1)
+        //        second shift => carry=0 (LSB=0 from 0x00000000)
+        //   - We'll just check final carry from the second shift (should be false)
+
+        let program = &[
+            Bytecode::LoadValue as u32,
+            1,
+            0x1,
+            // SHIFT RIGHT R1 by #1 => 0x1 -> 0x0 (carry=1)
+            Bytecode::ShiftRightValue as u32,
+            1,
+            1,
+            // SHIFT RIGHT R1 by #1 => 0x0 -> 0x0 (carry=0)
+            Bytecode::ShiftRightValue as u32,
+            1,
+            1,
+            Bytecode::Halt as u32,
+        ];
+
+        let cpu = run_program(program, 128, 4);
+        let registers = cpu.get_registers();
+
+        assert_eq!(registers[1], 0x0, "Final shift result is 0");
+        assert!(cpu.flags.zero, "Result is zero");
+        assert!(!cpu.flags.sign, "0 not negative");
+        assert!(!cpu.flags.carry, "Second shift from 0 => carry=0");
+        assert!(!cpu.flags.overflow);
     }
 }

@@ -185,6 +185,10 @@ pub enum Bytecode {
     Xor = 0x74,
     XorValue = 0x75,
     Not = 0x76,
+    ShiftLeft = 0x77,
+    ShiftLeftValue = 0x78,
+    ShiftRight = 0x79,
+    ShiftRightValue = 0x7A,
 
     //
     // 0xB0 - 0xBF: Byte-level memory
@@ -341,6 +345,10 @@ pub static INSTRUCTION_PATTERNS: Lazy<HashMap<Bytecode, &'static InstructionPatt
             InstructionPattern::new(Bytecode::Xor, &[Register, Register], "xor"),
             InstructionPattern::new(Bytecode::XorValue, &[Register, ImmediateI32], "xor"),
             InstructionPattern::new(Bytecode::Not, &[Register], "not"),
+            InstructionPattern::new(Bytecode::ShiftLeft, &[Register, Register], "shl"),
+            InstructionPattern::new(Bytecode::ShiftLeftValue, &[Register, ImmediateI32], "shl"),
+            InstructionPattern::new(Bytecode::ShiftRight, &[Register, Register], "shr"),
+            InstructionPattern::new(Bytecode::ShiftRightValue, &[Register, ImmediateI32], "shr"),
             // Memory operations
             InstructionPattern::new(Bytecode::LoadByte, &[Register, MemoryAddress], "loadbyte"),
             InstructionPattern::new(Bytecode::StoreByte, &[MemoryAddress, Register], "storebyte"),
