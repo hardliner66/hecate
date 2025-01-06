@@ -1,0 +1,10 @@
+[package]
+name = "hecate-bf"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+fck = "0.1.2"
+hecate-assembler = { version = "0.2.0", path = "../assembler" }
+clap = { version = "4.5.23", features = ["derive"] }
+anyhow = "1.0.95"

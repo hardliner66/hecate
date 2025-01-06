@@ -16,6 +16,8 @@ mod native;
 struct Args {
     #[arg(short, long, global = true)]
     verbose: bool,
+    #[arg(short, long, global = true)]
+    print_memory_access: bool,
     #[command(subcommand)]
     action: Action,
 }
@@ -54,7 +56,7 @@ impl HostIO for SimpleHostIo {
                         .collect::<Vec<_>>(),
                 )
                 .unwrap();
-                println!("{s}");
+                print!("{s}");
                 Ok(2500 + (length * 300))
             }
             _ => Err(hecate_common::ExecutionError::InvalidSyscall(code)),
@@ -62,9 +64,15 @@ impl HostIO for SimpleHostIo {
     }
 }
 
-fn run(memory: &[u32], entrypoint: u32, verbose: bool) -> anyhow::Result<()> {
+fn run(
+    memory: &[u32],
+    entrypoint: u32,
+    verbose: bool,
+    print_memory_access: bool,
+) -> anyhow::Result<()> {
     let mut cpu = NativeCpu::new(1024 * 1024, 32, SimpleHostIo);
     cpu.set_verbose(verbose);
+    cpu.set_print_memory_access(print_memory_access);
     cpu.set_entrypoint(entrypoint);
 
     cpu.load_protected_memory(0, memory);
@@ -126,7 +134,11 @@ fn conf() -> Conf {
 
 #[macroquad::main(conf)]
 async fn main() -> anyhow::Result<()> {
-    let Args { action, verbose } = Args::parse();
+    let Args {
+        action,
+        verbose,
+        print_memory_access,
+    } = Args::parse();
 
     match action {
         #[cfg(feature = "experimental_ui")]
@@ -136,7 +148,12 @@ async fn main() -> anyhow::Result<()> {
         Action::Run { path } => {
             let file = BytecodeFile::load(path).unwrap();
 
-            run(&file.data, file.header.entrypoint, verbose)?;
+            run(
+                &file.data,
+                file.header.entrypoint,
+                verbose,
+                print_memory_access,
+            )?;
         }
 
         Action::RunAsm { path } => {
@@ -144,7 +161,12 @@ async fn main() -> anyhow::Result<()> {
             let mut assembler = hecate_assembler::Assembler::new();
             let memory = assembler.assemble_program(&program)?;
 
-            run(&memory.data, memory.header.entrypoint, verbose)?;
+            run(
+                &memory.data,
+                memory.header.entrypoint,
+                verbose,
+                print_memory_access,
+            )?;
         }
     }
 

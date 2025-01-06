@@ -132,7 +132,6 @@ pub struct NativeCpu<IO: HostIO> {
     registers: Vec<u32>,
     instruction_pointer: u32,
     stack_pointer: u32,
-    verbose: bool,
     stats: CpuStats,
     flags: Flags,
     l1i: Cache,
@@ -146,6 +145,8 @@ pub struct NativeCpu<IO: HostIO> {
     stable_stride: Option<i32>,
     host_io: Option<IO>,
     halted: bool,
+    verbose: bool,
+    print_memory_access: bool,
 }
 
 impl<IO: HostIO> CpuTrait for NativeCpu<IO> {
@@ -157,6 +158,10 @@ impl<IO: HostIO> CpuTrait for NativeCpu<IO> {
 
     fn get_halted(&self) -> bool {
         self.halted
+    }
+
+    fn set_print_memory_access(&mut self, print_memory_access: bool) {
+        self.print_memory_access = print_memory_access;
     }
 
     fn set_verbose(&mut self, verbose: bool) {
@@ -220,6 +225,7 @@ impl<IO: HostIO> NativeCpu<IO> {
             stable_stride: None,
             host_io: Some(host_io),
             halted: false,
+            print_memory_access: false,
         }
     }
     /// Perform a logical left shift by `count` bits, returning (new_value, carry_bit).
@@ -284,7 +290,7 @@ impl<IO: HostIO> NativeCpu<IO> {
 
         // Check L1
         if let Some(l1_lat) = l1_cache.access(address, tag_l1) {
-            if self.verbose && direction != MemoryAccessDirection::Prefetch {
+            if self.print_memory_access && direction != MemoryAccessDirection::Prefetch {
                 println!(" (L1 HIT)");
             }
 
@@ -306,7 +312,7 @@ impl<IO: HostIO> NativeCpu<IO> {
 
         // L1 miss, check L2
         if let Some(l2_lat) = self.l2.access(address, tag_l2) {
-            if self.verbose && direction != MemoryAccessDirection::Prefetch {
+            if self.print_memory_access && direction != MemoryAccessDirection::Prefetch {
                 println!(" (L2 HIT)");
             }
             self.stats.cache_hits.l2 += 1;
@@ -325,7 +331,7 @@ impl<IO: HostIO> NativeCpu<IO> {
 
         // L2 miss, check L3
         if let Some(l3_lat) = self.l3.access(address, tag_l3) {
-            if self.verbose && direction != MemoryAccessDirection::Prefetch {
+            if self.print_memory_access && direction != MemoryAccessDirection::Prefetch {
                 println!(" (L3 HIT)");
             }
             self.stats.cache_hits.l3 += 1;
@@ -341,7 +347,7 @@ impl<IO: HostIO> NativeCpu<IO> {
             };
         }
 
-        if self.verbose && direction != MemoryAccessDirection::Prefetch {
+        if self.print_memory_access && direction != MemoryAccessDirection::Prefetch {
             println!(" (CACHE MISS)");
         }
 
@@ -434,7 +440,7 @@ impl<IO: HostIO> NativeCpu<IO> {
 
     fn read_instruction(&mut self, address: u32) -> Result<Bytecode, ExecutionError> {
         self.valid_address(address)?;
-        if self.verbose {
+        if self.print_memory_access {
             print!("READ INSTR @{:#02x}", address);
         }
         let cost = self.access(address, MemoryAccessDirection::LoadInstruction);
@@ -464,7 +470,7 @@ impl<IO: HostIO> NativeCpu<IO> {
 
     fn read_memory(&mut self, address: u32) -> Result<u32, ExecutionError> {
         self.valid_address(address)?;
-        if self.verbose {
+        if self.print_memory_access {
             print!("READ @{:#02x}", address);
         }
         let cost = self.access(address, MemoryAccessDirection::LoadData);
@@ -482,7 +488,7 @@ impl<IO: HostIO> NativeCpu<IO> {
         if self.protected_memory.contains(&address) {
             return Err(ExecutionError::WriteProtectedMemory(address));
         }
-        if self.verbose {
+        if self.print_memory_access {
             print!("WRITE @{:#02x}, {}", address, value);
         }
         let cost = self.access(address, MemoryAccessDirection::Store);
@@ -1383,6 +1389,7 @@ impl<IO: HostIO> NativeCpu<IO> {
                     if self.verbose {
                         println!("JMP {}", imm);
                     }
+                    self.instruction_pointer = imm;
                 }
                 Bytecode::Je
                 | Bytecode::Jne

@@ -11,8 +11,9 @@ store @1009, 114
 store @1010, 108
 store @1011, 100
 store @1012, 33
+store @1013, 0x0A
 load R1, 0
-load r1, 1000
-load r2, 13
+load R2, 1000
+load R3, 14
 syscall
 halt

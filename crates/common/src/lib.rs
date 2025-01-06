@@ -55,6 +55,7 @@ pub struct CpuStats {
 pub trait CpuTrait {
     type Size: Unsigned;
     fn set_verbose(&mut self, verbose: bool);
+    fn set_print_memory_access(&mut self, show_memory_access: bool);
 
     fn set_entrypoint(&mut self, entrypoint: u32);
 
