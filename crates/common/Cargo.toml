@@ -2,6 +2,9 @@
 name = "hecate-common"
 version = "0.1.0"
 edition = "2021"
+description = "Common data structures for the hecate vm"
+license-file = "../../LICENSE"
+repository = "https://github.com/hecate-vm/hecate-vm"
 
 [dependencies]
 bincode = "1.3.3"

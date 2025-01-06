@@ -13,6 +13,7 @@
 		"FMUL",
 		"FSUB",
 		"hasm",
+		"hepack",
 		"immediates",
 		"indexmap",
 		"Infographics",

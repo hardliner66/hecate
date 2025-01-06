@@ -2,6 +2,9 @@
 name = "hecate-assembler"
 version = "0.1.0"
 edition = "2021"
+description = "The assembler for the hecate vm"
+license-file = "../../LICENSE"
+repository = "https://github.com/hecate-vm/hecate-vm"
 
 [[bin]]
 name = "hasm"
