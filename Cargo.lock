@@ -350,6 +350,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "hecate-turtle"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "hecate-assembler",
+ "hecate-common",
+ "macroquad",
+]
+
+[[package]]
 name = "hecate-vm"
 version = "0.3.0"
 dependencies = [

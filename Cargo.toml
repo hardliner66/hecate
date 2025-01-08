@@ -22,4 +22,4 @@ default = []
 experimental_ui = []
 
 [workspace]
-members = ["crates/common", "crates/assembler", "crates/packer", "crates/bf"]
+members = ["crates/common", "crates/assembler", "crates/packer", "crates/bf", "crates/turtle"]

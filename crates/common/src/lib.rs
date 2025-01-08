@@ -3,17 +3,17 @@ use std::{
     error::Error,
     fs::File,
     io::{BufReader, BufWriter},
-    ops::Range,
     path::Path,
 };
 
 use indexmap::IndexMap;
 use num_derive::{FromPrimitive, ToPrimitive};
-use num_traits::Unsigned;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter};
 use thiserror::Error;
+
+pub mod native;
 
 #[derive(Error, Debug)]
 pub enum ExecutionError {
@@ -52,30 +52,6 @@ pub struct CpuStats {
     pub cycles: usize,
     pub memory_access_count: usize,
     pub cache_hits: CacheHits,
-}
-
-pub trait CpuTrait {
-    type Size: Unsigned;
-    fn set_verbose(&mut self, verbose: bool);
-    fn set_print_memory_access(&mut self, show_memory_access: bool);
-    fn set_addresses_as_integers(&mut self, addresses_as_integers: bool);
-
-    fn set_entrypoint(&mut self, entrypoint: u32);
-
-    fn load_memory(&mut self, address: Self::Size, memory: &[Self::Size]);
-    fn load_protected_memory(&mut self, address: Self::Size, memory: &[Self::Size]);
-
-    fn protect(&mut self, range: Range<Self::Size>);
-
-    fn execute(&mut self, run_mode: RunMode) -> Result<CpuStats, ExecutionError>;
-
-    fn get_registers(&self) -> &[Self::Size];
-
-    fn get_memory(&self) -> &[Self::Size];
-    fn set_halted(&mut self, halted: bool);
-    fn get_halted(&self) -> bool;
-
-    fn print_state(&self);
 }
 
 #[derive(Debug)]

@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, ops::Range};
 
-use hecate_common::{Bytecode, CpuStats, CpuTrait, ExecutionError, RunMode};
+use crate::{Bytecode, CpuStats, ExecutionError, RunMode};
 use num_traits::FromPrimitive;
 
 const L1_LATENCY: usize = 3;
@@ -143,21 +143,19 @@ pub struct NativeCpu<IO: HostIO> {
 
     last_load_addresses: Vec<u32>,
     stable_stride: Option<i32>,
-    host_io: Option<IO>,
+    pub host_io: Option<IO>,
     halted: bool,
     verbose: bool,
     print_memory_access: bool,
     addresses_as_integers: bool,
 }
 
-impl<IO: HostIO> CpuTrait for NativeCpu<IO> {
-    type Size = u32;
-
-    fn set_addresses_as_integers(&mut self, addresses_as_integers: bool) {
+impl<IO: HostIO> NativeCpu<IO> {
+    pub fn set_addresses_as_integers(&mut self, addresses_as_integers: bool) {
         self.addresses_as_integers = addresses_as_integers;
     }
 
-    fn print_state(&self) {
+    pub fn print_state(&self) {
         println!();
         println!("========== VM STATE ===========");
         println!();
@@ -177,42 +175,43 @@ impl<IO: HostIO> CpuTrait for NativeCpu<IO> {
         );
     }
 
-    fn set_halted(&mut self, halted: bool) {
+    pub fn set_halted(&mut self, halted: bool) {
         self.halted = halted;
     }
 
-    fn get_halted(&self) -> bool {
+    #[allow(unused)]
+    pub fn get_halted(&self) -> bool {
         self.halted
     }
 
-    fn set_print_memory_access(&mut self, print_memory_access: bool) {
+    pub fn set_print_memory_access(&mut self, print_memory_access: bool) {
         self.print_memory_access = print_memory_access;
     }
 
-    fn set_verbose(&mut self, verbose: bool) {
+    pub fn set_verbose(&mut self, verbose: bool) {
         self.verbose = verbose;
     }
 
-    fn set_entrypoint(&mut self, entrypoint: u32) {
+    pub fn set_entrypoint(&mut self, entrypoint: u32) {
         self.instruction_pointer = entrypoint;
     }
 
-    fn protect(&mut self, range: Range<Self::Size>) {
+    pub fn protect(&mut self, range: Range<u32>) {
         self.protected_memory = range;
     }
 
-    fn load_protected_memory(&mut self, address: Self::Size, memory: &[Self::Size]) {
+    pub fn load_protected_memory(&mut self, address: u32, memory: &[u32]) {
         let len = self.memory.len().min(memory.len());
         self.memory[address as usize..address as usize + len].copy_from_slice(&memory[..len]);
         self.protect(address..address + memory.len() as u32);
     }
 
-    fn load_memory(&mut self, address: Self::Size, memory: &[Self::Size]) {
+    pub fn load_memory(&mut self, address: u32, memory: &[u32]) {
         let len = self.memory.len().min(memory.len());
         self.memory[address as usize..address as usize + len].copy_from_slice(&memory[..len]);
     }
 
-    fn execute(&mut self, run_mode: RunMode) -> Result<CpuStats, ExecutionError> {
+    pub fn execute(&mut self, run_mode: RunMode) -> Result<CpuStats, ExecutionError> {
         match run_mode {
             RunMode::Run => self.run(-1),
             RunMode::RunFor(cycles) => self.run(cycles),
@@ -220,16 +219,18 @@ impl<IO: HostIO> CpuTrait for NativeCpu<IO> {
         }
     }
 
-    fn get_registers(&self) -> &[Self::Size] {
+    pub fn get_registers(&self) -> &[u32] {
         &self.registers
     }
 
-    fn get_memory(&self) -> &[Self::Size] {
+    pub fn get_mut_registers(&mut self) -> &mut [u32] {
+        &mut self.registers
+    }
+
+    pub fn get_memory(&self) -> &[u32] {
         &self.memory
     }
-}
 
-impl<IO: HostIO> NativeCpu<IO> {
     pub fn new(memory_size: u32, registers: u8, host_io: IO) -> Self {
         Self {
             memory: vec![0; memory_size as usize],

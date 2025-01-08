@@ -1,8 +1,10 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
-use hecate_common::{BytecodeFile, CpuTrait, RunMode};
-use native::{HostIO, NativeCpu};
+use hecate_common::{
+    native::{HostIO, NativeCpu},
+    BytecodeFile, RunMode,
+};
 
 #[cfg(feature = "experimental_ui")]
 use macroquad::prelude::*;
@@ -12,8 +14,6 @@ use macroquad::ui::root_ui;
 
 #[cfg(not(feature = "experimental_ui"))]
 use macroquad::prelude::Conf;
-
-mod native;
 
 #[derive(Parser)]
 struct Args {
