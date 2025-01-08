@@ -8,6 +8,9 @@ use hecate_common::{
 use clap::{Parser, Subcommand};
 use macroquad::prelude::*;
 
+const TICKS_PER_SECOND: u32 = 1000; // Target tick rate
+const SECONDS_PER_TICK: f64 = 1.0 / TICKS_PER_SECOND as f64; // Duration of each tick in seconds
+
 #[derive(Debug)]
 struct TurtleState {
     x: f64,           // Current X position
@@ -28,7 +31,7 @@ impl TurtleState {
             pen_down: true,
             pen_color: WHITE,
             pen_size: 2.0,
-            speed: 60,
+            speed: TICKS_PER_SECOND,
         }
     }
 
@@ -77,7 +80,7 @@ impl TurtleState {
     }
 
     pub fn set_speed(&mut self, speed: u32) {
-        self.speed = speed;
+        self.speed = speed.clamp(0, TICKS_PER_SECOND);
     }
 
     pub fn set_pen_size(&mut self, size: f32) {
@@ -251,13 +254,11 @@ fn draw_turtle(turtle: &TurtleState) {
     }
 }
 
-const TICKS_PER_SECOND: u32 = 60; // Target tick rate
-const SECONDS_PER_TICK: f64 = 1.0 / TICKS_PER_SECOND as f64; // Duration of each tick in seconds
-
 async fn run(rom: &[u32], entrypoint: u32) -> anyhow::Result<()> {
     let mut cpu = NativeCpu::new(1024 * 1024, 32, TurtleIo::new());
     {
         let regs = cpu.get_mut_registers();
+        regs[29] = TICKS_PER_SECOND;
         regs[30] = screen_width() as u32;
         regs[31] = screen_height() as u32;
     }

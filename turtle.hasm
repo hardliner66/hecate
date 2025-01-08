@@ -1,7 +1,7 @@
 ; Initialize turtle state
-; Set speed to 60 (max)
+; Set speed to max
 load r1, 11        ; Syscall code for set_sleep_ticks
-load r2, 60        ; how many ticks fast to go
+load r2, r29        ; how many ticks fast to go
 syscall            ; Execute syscall
 
 load r1, 9          ; Syscall code for clear_screen
@@ -53,10 +53,15 @@ load r1, 7          ; Syscall code for set_pen_color
 load r2, r8         ; Color (RGB in hex)
 syscall             ; Execute syscall
 
-; Set speed to 4
+; reset speed
 load r1, 11        ; Syscall code for set_sleep_ticks
-load r2, 60        ; how fast to go
+load r2, 980       ; how fast to go
 syscall            ; Execute syscall
+
+; set up how many times to loop
+load r5, 8
+mul r5, 10
+sub r5, 1
 
 loop:
     ; Move forward by 50 units
@@ -113,7 +118,13 @@ loop:
     load r2, r8         ; Color (RGB in hex)
     syscall             ; Execute syscall
 
+    cmp r5, r0
+    je @end
+
+    sub r5, 1
+
     jmp @loop
 
+end:
     ; End of program
     halt               ; Stop execution
