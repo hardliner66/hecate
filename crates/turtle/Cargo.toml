@@ -1,6 +1,6 @@
 [package]
 name = "hecate-turtle"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 description = "A turtle implementation based on hecate vm"
 license-file = "../../LICENSE"
