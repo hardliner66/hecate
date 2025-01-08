@@ -46,7 +46,8 @@ jobs:
           strip --strip-all ./target/release/hasm
           strip --strip-all ./target/release/hecate-vm
           strip --strip-all ./target/release/hepack
-          tar -czf hecate-linux.tar.gz -C ./target/release/ hasm hecate-vm hepack
+          strip --strip-all ./target/release/hecate-turtle
+          tar -czf hecate-linux.tar.gz -C ./target/release/ hasm hecate-vm hepack hecate-turtle
 
       - name: Upload release
         id: upload-release-linux
@@ -71,7 +72,7 @@ jobs:
       - name: Run build
         run: |
           cargo build --all --release
-          tar -czf hecate-macos.tar.gz -C ./target/release/ hasm hecate-vm hepack
+          tar -czf hecate-macos.tar.gz -C ./target/release/ hasm hecate-vm hepack hecate-turtle
 
       - name: Upload release
         id: upload-release-linux
